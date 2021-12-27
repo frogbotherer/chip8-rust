@@ -1,11 +1,11 @@
 use std::io;
 use termion::raw::{IntoRawMode, RawTerminal};
 use tui::backend::TermionBackend;
+use tui::layout::Rect;
 use tui::style::{Color, Style};
 use tui::symbols::Marker;
 use tui::widgets::canvas::Canvas;
 use tui::widgets::{Block, Borders};
-use tui::layout::Rect;
 use tui::Terminal;
 
 /// Display is used by the interpreter to draw things on the screen. It should
@@ -34,10 +34,13 @@ impl Resolution {
     }
 
     fn y_bounds(&self) -> [f64; 2] {
-        [-1.0*(self.1 - 1) as f64, 0.0]
+        [-1.0 * (self.1 - 1) as f64, 0.0]
     }
 
-    fn points_from_data<'a>(&self, data: &'a [u8]) -> impl std::iter::Iterator<Item = (f64, f64, Color)> + 'a {
+    fn points_from_data<'a>(
+        &self,
+        data: &'a [u8],
+    ) -> impl std::iter::Iterator<Item = (f64, f64, Color)> + 'a {
         let mut count = self.pixel_count();
         let w = self.0;
         std::iter::from_fn(move || {
@@ -47,10 +50,11 @@ impl Resolution {
                     count -= 1;
                     let bit = 1 & (data[count / 8] >> (7 - count % 8));
                     Some((
-                        (count % w) as f64, // x
+                        (count % w) as f64,        // x
                         -1.0 * (count / w) as f64, // y
-                        if bit == 1 { Color::White } else { Color::Black }))
-                },
+                        if bit == 1 { Color::White } else { Color::Black },
+                    ))
+                }
             }
         })
     }
@@ -67,32 +71,44 @@ impl MonoTermDisplay {
         let stdout = io::stdout().into_raw_mode()?;
         let backend = TermionBackend::new(stdout);
         let terminal = Terminal::new(backend)?;
-        Ok(MonoTermDisplay{
+        Ok(MonoTermDisplay {
             terminal,
-            resolution: Resolution(x, y, 1)
+            resolution: Resolution(x, y, 1),
         })
     }
-
 }
 
 impl Display for MonoTermDisplay {
     fn draw(&mut self, data: &[u8]) -> Result<(), io::Error> {
         // make sure we're given exactly the right amount of data to draw
-        assert_eq!(data.len(), self.resolution.byte_count(),
-                  "MonoTermDisplay must have correct-sized data to draw");
+        assert_eq!(
+            data.len(),
+            self.resolution.byte_count(),
+            "MonoTermDisplay must have correct-sized data to draw"
+        );
         // i don't know how to draw things that aren't mono
-        assert_eq!(self.resolution.2, 1,
-                   "MonoTermDisplay can only render one bitplane");
+        assert_eq!(
+            self.resolution.2, 1,
+            "MonoTermDisplay can only render one bitplane"
+        );
 
         // for now this assumes a 1:1 ratio between terminal, chip8 and the
         // internal TUI canvas
         self.terminal.draw(|f| {
-            let size = Rect::new(0, 0,
+            let size = Rect::new(
+                0,
+                0,
                 2 + self.resolution.0 as u16,
-                2 + self.resolution.1 as u16);
+                2 + self.resolution.1 as u16,
+            );
 
             let canvas = Canvas::default()
-                .block(Block::default().title("CHIP-8").borders(Borders::ALL).style(Style::default().bg(Color::Black)))
+                .block(
+                    Block::default()
+                        .title("CHIP-8")
+                        .borders(Borders::ALL)
+                        .style(Style::default().bg(Color::Black)),
+                )
                 .x_bounds(self.resolution.x_bounds())
                 .y_bounds(self.resolution.y_bounds())
                 .marker(Marker::Braille)
@@ -103,7 +119,7 @@ impl Display for MonoTermDisplay {
                     for (x, y, c) in self.resolution.points_from_data(&data) {
                         ctx.print(x, y, "\u{2588}", c);
                     }
-               });
+                });
             f.render_widget(canvas, size);
         })?;
         Ok(())
@@ -165,10 +181,11 @@ mod tests {
     fn test_draw_accepts_test_card() -> Result<(), io::Error> {
         let mut d = MonoTermDisplay::new(64, 32).unwrap();
         d.draw(&CHIP8_TEST_CARD)
-   }
+    }
 }
 
 /// this is a display test card suitable for CHIP8, for testing display routines
+#[rustfmt::skip]
 pub const CHIP8_TEST_CARD: [u8; 256] = [
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, // 00 XXXXXXX|XXXXXXX|XXXXXXX|XXXXXXX|XXXXXXX|XXXXXXX|XXXXXXX|XXXXXXX|
     0x80, 0x00, 0x00, 0x01, 0x80, 0x00, 0x00, 0x01, // 01 X                              |X                              |
@@ -202,4 +219,4 @@ pub const CHIP8_TEST_CARD: [u8; 256] = [
     0xaa, 0xaa, 0x83, 0xc3, 0xc5, 0x55, 0x55, 0x01, // 29 X X X X X X X X X     X|XX    X|XX   X | X X X | X X X |       |
     0x80, 0x00, 0x00, 0x01, 0x80, 0x00, 0x00, 0x01, // 30 X                              |X                              |
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, // 31 XXXXXXX|XXXXXXX|XXXXXXX|XXXXXXX|XXXXXXX|XXXXXXX|XXXXXXX|XXXXXXX|
-];                                                  // .. 0......78......f0......78......f0......78......f0......78......f
+]; //                                                  .. 0......78......f0......78......f0......78......f0......78......f

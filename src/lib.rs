@@ -1,3 +1,4 @@
+pub mod display;
 ///
 /// ## Design
 ///
@@ -50,4 +51,3 @@
 ///       |   }
 ///       `-- sleep(new_cycles * 4.54us)
 mod interpreter;
-pub mod display;
