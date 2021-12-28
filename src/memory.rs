@@ -8,13 +8,17 @@ pub struct MemoryMap {
 
 impl MemoryMap {
     pub fn new(size: usize) -> MemoryMap {
-        MemoryMap{
+        MemoryMap {
             bytes: vec![0; size],
         }
     }
 
     /// write unknown len of data into memory at a particular address
-    pub fn write_any(&mut self, reader: &mut impl io::Read, address: usize) -> Result<(), io::Error> {
+    pub fn write_any(
+        &mut self,
+        reader: &mut impl io::Read,
+        address: usize,
+    ) -> Result<(), io::Error> {
         // there's probably a considerably slicker way of splicing a bunch of
         // u8 from disk into a chunk of RAM
         let mut buf = Vec::new();
@@ -29,7 +33,6 @@ impl MemoryMap {
         let _: Vec<_> = self.bytes.splice(address..splice_end, data).collect();
         Ok(())
     }
-
 }
 
 #[cfg(test)]

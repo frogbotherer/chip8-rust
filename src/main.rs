@@ -1,5 +1,5 @@
-use std::io;
 use std::fs::File;
+use std::io;
 
 use chip8::display::{Display, MonoTermDisplay, CHIP8_TEST_CARD};
 use chip8::memory::MemoryMap;
