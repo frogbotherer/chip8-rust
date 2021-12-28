@@ -164,7 +164,7 @@ mod tests {
     fn test_px_iterator() {
         let r = Resolution(64, 32, 1);
         let px = r.points_from_data(&[0; 256]);
-        for (x, y, colour) in px {
+        for (_x, _y, colour) in px {
             assert_eq!(colour, Color::Black);
         }
     }
@@ -178,6 +178,8 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
+    // NB. figure out how to stop rendering during tests
     fn test_draw_accepts_test_card() -> Result<(), io::Error> {
         let mut d = MonoTermDisplay::new(64, 32).unwrap();
         d.draw(&CHIP8_TEST_CARD)

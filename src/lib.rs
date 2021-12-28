@@ -50,4 +50,5 @@ pub mod display;
 ///       |     interrupt_queue.insert(interrupt_queue.pop())
 ///       |   }
 ///       `-- sleep(new_cycles * 4.54us)
-mod interpreter;
+pub mod interpreter;
+pub mod memory;
