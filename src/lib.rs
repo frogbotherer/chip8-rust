@@ -50,5 +50,10 @@ pub mod display;
 ///       |     interrupt_queue.insert(interrupt_queue.pop())
 ///       |   }
 ///       `-- sleep(new_cycles * 4.54us)
+///
+/// # Useful links
+///
+/// * ROMs: https://github.com/dmatlack/chip8/tree/master/roms
+/// * COSMAC details: https://laurencescotford.com/chip-8-on-the-cosmac-vip-index/
 pub mod interpreter;
 pub mod memory;

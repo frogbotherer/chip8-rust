@@ -14,8 +14,6 @@ use tui::Terminal;
 pub trait Display {
     /// draw data based on internal resolution of display
     fn draw(&mut self, data: &[u8]) -> Result<(), io::Error>;
-    /// set internal resolution
-    fn size(&mut self, x: usize, y: usize, bits: usize) -> &mut Self;
 }
 
 // store useful metadata about the terminal
@@ -123,11 +121,6 @@ impl Display for MonoTermDisplay {
             f.render_widget(canvas, size);
         })?;
         Ok(())
-    }
-
-    fn size(&mut self, x: usize, y: usize, bits: usize) -> &mut Self {
-        self.resolution = Resolution(x, y, bits);
-        self
     }
 }
 
