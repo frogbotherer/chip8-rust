@@ -27,7 +27,10 @@ pub struct Chip8Interpreter<'a> {
     memory: memory::Chip8MemoryMap,
     display: &'a mut dyn display::Display,
     stack_pointer: u16,
-    instruction: Option<fn(&mut Chip8Interpreter<'a>) -> usize>,
+    // contains the decoded instruction and the original four bytes
+    // TODO use an enum or struct instead of Option?
+    instruction: Option<fn(&mut Chip8Interpreter<'a>) -> Result<usize, io::Error>>,
+    instruction_data: u16,
     program_counter: u16,
     vx: u16,
     vy: u16,
@@ -47,6 +50,7 @@ impl<'a> Chip8Interpreter<'a> {
             display,
             stack_pointer: 0x0000,
             instruction: None,
+            instruction_data: 0x0000,
             program_counter: 0x0000,
             vx: 0x0000,
             vy: 0x0000,
@@ -70,12 +74,13 @@ impl<'a> Chip8Interpreter<'a> {
 
     /// external interrupt
     pub fn interrupt(&mut self) -> Result<(), io::Error> {
+        // TODO soft-code
         self.display
             .draw(self.memory.get_ro_slice(self.display_pointer, 0x100))
     }
 
     /// TODO
-    fn cycle(&mut self) -> usize {
+    fn cycle(&mut self) -> Result<usize, io::Error> {
         match self.state {
             InterpreterState::FetchDecode => self.fetch_and_decode(),
             InterpreterState::Execute => self.call(),
@@ -88,25 +93,35 @@ impl<'a> Chip8Interpreter<'a> {
     }
 
     /// fetch the instruction at the program counter, figure out what it is,
-    /// update the program counter, update the interpreter state
-    fn fetch_and_decode(&mut self) -> usize {
+    /// set vx/vy, update the program counter, update the interpreter state
+    fn fetch_and_decode(&mut self) -> Result<usize, io::Error> {
         let inst = self.memory.get_word(self.program_counter);
+
+        // first byte, second nybble
+        self.vx = (inst & 0x0f00) >> 8;
+        // second byte, first nybble
+        self.vy = (inst & 0x00f0) >> 4;
 
         self.instruction = Some(match inst {
             0x00e0 => Chip8Interpreter::inst_clear_screen,
+            0x1000..=0x1fff => Chip8Interpreter::inst_branch,
+            0x6000..=0x6fff => Chip8Interpreter::inst_load_vx,
+            0x7000..=0x7fff => Chip8Interpreter::inst_add_to_vx,
             0xa000..=0xafff => Chip8Interpreter::inst_set_i,
             _ => panic!("Failed to decode instruction {:04x?}", inst),
         });
+
+        self.instruction_data = inst;
 
         self.program_counter += 2;
         self.state = InterpreterState::Execute;
 
         // execution time is 40 cycles for 0xxx and 68 cycles otherwise
-        if inst > 0x0fff { 68 } else { 40 }
+        if inst > 0x0fff { Ok(68) } else { Ok(40) }
     }
 
     /// call the most recently-decoded instruction
-    fn call(&mut self) -> usize {
+    fn call(&mut self) -> Result<usize, io::Error> {
         self.state = InterpreterState::FetchDecode;
         match self.instruction {
             Some(i) => i(self),
@@ -115,13 +130,32 @@ impl<'a> Chip8Interpreter<'a> {
     }
 
     /// 00e0
-    fn inst_clear_screen(&mut self) -> usize {
-        1
+    fn inst_clear_screen(&mut self) -> Result<usize, io::Error> {
+        // TODO: soft-code
+        self.memory.write(&[0; 0x0100], self.display_pointer, 0x0100)?;
+        Ok(24)
     }
-
+    /// 1nnn
+    fn inst_branch(&mut self) -> Result<usize, io::Error> {
+        self.program_counter = self.instruction_data & 0xfff;
+        Ok(12)
+    }
+    /// 6xnn
+    fn inst_load_vx(&mut self) -> Result<usize, io::Error> {
+        self.memory.write(&[(self.instruction_data & 0xff) as u8], self.memory.var_addr + self.vx, 1)?;
+        Ok(6)
+    }
+    /// 7xnn
+    fn inst_add_to_vx(&mut self) -> Result<usize, io::Error> {
+        let v = self.memory.get_rw_slice(self.memory.var_addr + self.vx, 1);
+        v[0] = (((v[0] as u16) + (self.instruction_data & 0xff)) & 0xff) as u8;
+        Ok(10)
+    }
     /// annn
-    fn inst_set_i(&mut self) -> usize {
-        2
+    // see https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+    fn inst_set_i(&mut self) -> Result<usize, io::Error> {
+        self.i = self.instruction_data & 0xfff;
+        Ok(12)
     }
 }
 
@@ -142,7 +176,7 @@ enum InterpreterState {
     Start,
     FetchDecode,
     Execute,
-    Interrupt
+    WaitInterrupt // waiting for an interrupt
 }
 
 #[cfg(test)]
@@ -165,7 +199,7 @@ mod tests {
     #[test]
     fn test_fetch_and_decode_moves_pc() -> Result<(), io::Error> {
         test_with(|i| {
-            let _ = i.fetch_and_decode();
+            let _ = i.fetch_and_decode()?;
             assert_eq!(i.program_counter, 0x202);
             Ok(())
         })
@@ -174,7 +208,7 @@ mod tests {
     #[test]
     fn test_fetch_and_decode_sets_state() -> Result<(), io::Error> {
         test_with(|i| {
-            let _ = i.fetch_and_decode();
+            let _ = i.fetch_and_decode()?;
             assert!(i.state == InterpreterState::Execute);
             Ok(())
         })
@@ -185,7 +219,7 @@ mod tests {
         // 0xxx instructions take 40 machine cycles on the original chip-8
         // the first test fixture instruction is 00e0
         test_with(|i| {
-            assert_eq!(i.fetch_and_decode(), 40);
+            assert_eq!(i.fetch_and_decode()?, 40);
             Ok(())
         })
     }
@@ -195,8 +229,29 @@ mod tests {
         // other instructions take 68 machine cycles
         // the second test fixture instruction is axxx
         test_with(|i| {
-            let _ = i.fetch_and_decode();
-            assert_eq!(i.fetch_and_decode(), 68);
+            let _ = i.fetch_and_decode()?;
+            assert_eq!(i.fetch_and_decode()?, 68);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_fetch_and_decode_sets_vx() -> Result<(), io::Error> {
+        test_with(|i| {
+            // second test fixture instruction is a22a
+            let _ = i.fetch_and_decode()?;
+            let _ = i.fetch_and_decode()?;
+            assert_eq!(i.vx, 0x02);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_fetch_and_decode_sets_vy() -> Result<(), io::Error> {
+        test_with(|i| {
+            // first test fixture instruction is 0e00
+            let _ = i.fetch_and_decode()?;
+            assert_eq!(i.vy, 0x0e);
             Ok(())
         })
     }
@@ -204,8 +259,126 @@ mod tests {
     #[test]
     fn test_call_ok() -> Result<(), io::Error> {
         test_with(|i| {
-            let _ = i.fetch_and_decode();
-            assert_eq!(i.call(), 1);
+            let _ = i.fetch_and_decode()?;
+            assert_eq!(i.call()?, 24);  // cycles for 0e00
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_clear_screen() -> Result<(), io::Error> {
+        // 0e00
+        test_with(|i| {
+            // fill display memory with 1s
+            let m: &[u8] = &[1; 256];
+            i.memory.write(&m, 0xf00, 0x100)?;
+
+            // call 0e00
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_clear_screen()?;
+
+            assert_eq!(i.memory.get_ro_slice(0xf00, 0x100), &[0; 256]);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-machine-code-integration/
+            // takes 24 cycles
+            assert_eq!(t, 24);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_branch() -> Result<(), io::Error> {
+        test_with(|i| {
+            let mut m: &[u8] = &[0x12, 0x34];
+            i.load_program(&mut m)?;
+
+            // call 1234
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_branch()?;
+
+            assert_eq!(i.program_counter, 0x234);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
+            // takes 12 cycles
+            assert_eq!(t, 12);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_load_vx() -> Result<(), io::Error> {
+        test_with(|i| {
+            let mut m: &[u8] = &[0x61, 0x23];
+            i.load_program(&mut m)?;
+
+            // call 6123
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_load_vx()?;
+
+            assert_eq!(i.vx, 1);
+            // 0xef0 is where vx variables are on 4k layout
+            assert_eq!(i.memory.get_ro_slice(0xef0, 16), &[0, 0x23, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+            // takes 6 cycles
+            assert_eq!(t, 6);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_add_to_vx() -> Result<(), io::Error> {
+        test_with(|i| {
+            let mut m: &[u8] = &[0x71, 0x99];
+            i.load_program(&mut m)?;
+
+            // call 7123
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_add_to_vx()?;
+
+            assert_eq!(i.vx, 1);
+            // 0xef0 is where vx variables are on 4k layout
+            assert_eq!(i.memory.get_ro_slice(0xef0, 16), &[0, 0x99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-arithmetic-and-logic-instructions/
+            // takes 10 cycles
+            assert_eq!(t, 10);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_add_to_vx_overrun() -> Result<(), io::Error> {
+        test_with(|i| {
+            let mut m: &[u8] = &[0x61, 0x81, 0x71, 0x82];
+            i.load_program(&mut m)?;
+
+            // call 7123
+            let _ = i.fetch_and_decode()?;
+            let _ = i.inst_load_vx()?;
+            let _ = i.fetch_and_decode()?;
+            let _ = i.inst_add_to_vx()?;
+
+            // 0xef0 is where vx variables are on 4k layout
+            assert_eq!(i.memory.get_ro_slice(0xef0, 16), &[0, 0x03, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_set_i() -> Result<(), io::Error> {
+        // annn
+        test_with(|i| {
+            let mut m: &[u8] = &[0xa1, 0x23];
+            i.load_program(&mut m)?;
+
+            // call a123
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_set_i()?;
+
+            assert_eq!(i.i, 0x123);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+            // takes 12 cycles
+            assert_eq!(t, 12);
             Ok(())
         })
     }

@@ -14,6 +14,9 @@ use tui::Terminal;
 pub trait Display {
     /// draw data based on internal resolution of display
     fn draw(&mut self, data: &[u8]) -> Result<(), io::Error>;
+
+    /// how big the display data should be
+    fn get_display_size_bytes(&mut self) -> usize;
 }
 
 // store useful metadata about the terminal
@@ -122,6 +125,12 @@ impl Display for MonoTermDisplay {
         })?;
         Ok(())
     }
+
+    /// how big the display data should be
+    fn get_display_size_bytes(&mut self) -> usize {
+        self.resolution.byte_count()
+    }
+
 }
 
 /// useful for testing non-display routines
@@ -138,6 +147,9 @@ impl Display for DummyDisplay {
     #[allow(unused)]
     fn draw(&mut self, data: &[u8]) -> Result<(), io::Error> {
         Ok(())
+    }
+    fn get_display_size_bytes(&mut self) -> usize {
+        0x100
     }
 }
 
@@ -180,6 +192,12 @@ mod tests {
     }
 
     // MonoTermDisplay tests
+    #[test]
+    fn test_display_size() {
+        let mut d = MonoTermDisplay::new(64, 32).unwrap();
+        assert_eq!(d.get_display_size_bytes(), 256);
+    }
+
     #[test]
     #[should_panic]
     fn test_draw_rejects_wrong_data() {
