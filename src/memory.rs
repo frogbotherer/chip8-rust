@@ -94,9 +94,13 @@ impl Chip8MemoryMap {
             stack_addr: CHIP8_RAM_SIZE_BYTES - CHIP8_STACK_OFFSET,
             work_addr: CHIP8_RAM_SIZE_BYTES - CHIP8_WORK_OFFSET,
             var_addr: CHIP8_RAM_SIZE_BYTES - CHIP8_VAR_OFFSET,
-            display_addr: CHIP8_RAM_SIZE_BYTES - CHIP8_DISPLAY_OFFSET, 
+            display_addr: CHIP8_RAM_SIZE_BYTES - CHIP8_DISPLAY_OFFSET,
         };
-        mm.write(&CHIP8_CONTEMPORARY_FONT, CHIP8_CONTEMPORARY_FONT_ADDR, CHIP8_CONTEMPORARY_FONT.len())?;
+        mm.write(
+            &CHIP8_CONTEMPORARY_FONT,
+            CHIP8_CONTEMPORARY_FONT_ADDR,
+            CHIP8_CONTEMPORARY_FONT.len(),
+        )?;
         Ok(mm)
     }
 

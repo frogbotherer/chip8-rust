@@ -117,7 +117,11 @@ impl<'a> Chip8Interpreter<'a> {
         self.state = InterpreterState::Execute;
 
         // execution time is 40 cycles for 0xxx and 68 cycles otherwise
-        if inst > 0x0fff { Ok(68) } else { Ok(40) }
+        if inst > 0x0fff {
+            Ok(68)
+        } else {
+            Ok(40)
+        }
     }
 
     /// call the most recently-decoded instruction
@@ -125,14 +129,15 @@ impl<'a> Chip8Interpreter<'a> {
         self.state = InterpreterState::FetchDecode;
         match self.instruction {
             Some(i) => i(self),
-            None => panic!("Null pointer exception?!")
+            None => panic!("Null pointer exception?!"),
         }
     }
 
     /// 00e0
     fn inst_clear_screen(&mut self) -> Result<usize, io::Error> {
         // TODO: soft-code
-        self.memory.write(&[0; 0x0100], self.display_pointer, 0x0100)?;
+        self.memory
+            .write(&[0; 0x0100], self.display_pointer, 0x0100)?;
         Ok(24)
     }
     /// 1nnn
@@ -142,7 +147,11 @@ impl<'a> Chip8Interpreter<'a> {
     }
     /// 6xnn
     fn inst_load_vx(&mut self) -> Result<usize, io::Error> {
-        self.memory.write(&[(self.instruction_data & 0xff) as u8], self.memory.var_addr + self.vx, 1)?;
+        self.memory.write(
+            &[(self.instruction_data & 0xff) as u8],
+            self.memory.var_addr + self.vx,
+            1,
+        )?;
         Ok(6)
     }
     /// 7xnn
@@ -176,14 +185,16 @@ enum InterpreterState {
     Start,
     FetchDecode,
     Execute,
-    WaitInterrupt // waiting for an interrupt
+    WaitInterrupt, // waiting for an interrupt
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn test_with(f: fn(i: &mut Chip8Interpreter) -> Result<(), io::Error>) -> Result<(), io::Error> {
+    fn test_with(
+        f: fn(i: &mut Chip8Interpreter) -> Result<(), io::Error>,
+    ) -> Result<(), io::Error> {
         let mut display = display::DummyDisplay::new()?;
         let mut i = Chip8Interpreter::new(&mut display)?;
         let mut prog: &[u8] = &[0x00, 0xe0, 0xa2, 0x2a, 0x60, 0x0c];
@@ -193,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_program_load_ok() -> Result<(), io::Error> {
-        test_with(|_i| { Ok(()) })
+        test_with(|_i| Ok(()))
     }
 
     #[test]
@@ -260,7 +271,7 @@ mod tests {
     fn test_call_ok() -> Result<(), io::Error> {
         test_with(|i| {
             let _ = i.fetch_and_decode()?;
-            assert_eq!(i.call()?, 24);  // cycles for 0e00
+            assert_eq!(i.call()?, 24); // cycles for 0e00
             Ok(())
         })
     }
@@ -315,7 +326,10 @@ mod tests {
 
             assert_eq!(i.vx, 1);
             // 0xef0 is where vx variables are on 4k layout
-            assert_eq!(i.memory.get_ro_slice(0xef0, 16), &[0, 0x23, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+            assert_eq!(
+                i.memory.get_ro_slice(0xef0, 16),
+                &[0, 0x23, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            );
 
             // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
             // takes 6 cycles
@@ -336,7 +350,10 @@ mod tests {
 
             assert_eq!(i.vx, 1);
             // 0xef0 is where vx variables are on 4k layout
-            assert_eq!(i.memory.get_ro_slice(0xef0, 16), &[0, 0x99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+            assert_eq!(
+                i.memory.get_ro_slice(0xef0, 16),
+                &[0, 0x99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            );
 
             // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-arithmetic-and-logic-instructions/
             // takes 10 cycles
@@ -358,7 +375,10 @@ mod tests {
             let _ = i.inst_add_to_vx()?;
 
             // 0xef0 is where vx variables are on 4k layout
-            assert_eq!(i.memory.get_ro_slice(0xef0, 16), &[0, 0x03, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+            assert_eq!(
+                i.memory.get_ro_slice(0xef0, 16),
+                &[0, 0x03, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            );
 
             Ok(())
         })
@@ -382,5 +402,4 @@ mod tests {
             Ok(())
         })
     }
-
 }

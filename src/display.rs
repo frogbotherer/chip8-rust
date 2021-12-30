@@ -130,7 +130,6 @@ impl Display for MonoTermDisplay {
     fn get_display_size_bytes(&mut self) -> usize {
         self.resolution.byte_count()
     }
-
 }
 
 /// useful for testing non-display routines
