@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io;
 
-use chip8::display::{Display, MonoTermDisplay, CHIP8_TEST_CARD};
+use chip8::display::MonoTermDisplay;
 use chip8::interpreter::Chip8Interpreter;
 
 fn main() -> Result<(), io::Error> {

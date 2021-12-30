@@ -22,10 +22,16 @@ pub trait MemoryMap {
         Ok(())
     }
 
-    /// get a r/w slice of the underlying memory
+    /// get a two-byte word (stack)
+    fn get_word(&mut self, addr: u16) -> u16 {
+        let word = self.get_ro_slice(addr, 2);
+        ((word[0] as u16) << 8) + (word[1] as u16)
+    }
+
+    /// get a r/w slice of the underlying memory (heap)
     fn get_rw_slice(&mut self, addr: u16, len: usize) -> &mut [u8];
 
-    /// get a r/o slice of the underlying memory
+    /// get a r/o slice of the underlying memory (heap)
     fn get_ro_slice(&self, addr: u16, len: usize) -> &[u8];
 }
 
@@ -88,13 +94,9 @@ impl Chip8MemoryMap {
             stack_addr: CHIP8_RAM_SIZE_BYTES - CHIP8_STACK_OFFSET,
             work_addr: CHIP8_RAM_SIZE_BYTES - CHIP8_WORK_OFFSET,
             var_addr: CHIP8_RAM_SIZE_BYTES - CHIP8_VAR_OFFSET,
-            display_addr: CHIP8_RAM_SIZE_BYTES - CHIP8_DISPLAY_OFFSET,
+            display_addr: CHIP8_RAM_SIZE_BYTES - CHIP8_DISPLAY_OFFSET, 
         };
-        mm.write(
-            &CHIP8_CONTEMPORARY_FONT,
-            CHIP8_CONTEMPORARY_FONT_ADDR,
-            CHIP8_CONTEMPORARY_FONT.len(),
-        )?;
+        mm.write(&CHIP8_CONTEMPORARY_FONT, CHIP8_CONTEMPORARY_FONT_ADDR, CHIP8_CONTEMPORARY_FONT.len())?;
         Ok(mm)
     }
 
@@ -167,23 +169,29 @@ mod tests {
     }
 
     #[test]
-    fn test_write_slice_ok() -> Result<(), io::Error> {
-        let mut dst = Chip8MemoryMap::new()?;
+    fn test_write_slice_ok() {
+        let mut dst = Chip8MemoryMap::new().unwrap();
         let src: &[u8] = &[0, 1, 2, 3, 4, 5, 6, 7];
-        dst.write(&src, 8, 8)?;
+        dst.write(&src, 8, 8).unwrap();
         assert_eq!(
             dst.bytes[..16],
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7]
         );
-        Ok(())
     }
 
     #[test]
-    fn test_read_ro() -> Result<(), io::Error> {
-        let m = Chip8MemoryMap::new()?;
+    fn test_read_ro() {
+        let m = Chip8MemoryMap::new().unwrap();
         let s = m.get_ro_slice(0, 8);
         assert_eq!(s, &[0, 0, 0, 0, 0, 0, 0, 0]);
-        Ok(())
+    }
+
+    #[test]
+    fn test_read_word() {
+        let mut m = Chip8MemoryMap::new().unwrap();
+        let mut src: &[u8] = &[0, 1, 2, 3, 4, 5, 6, 7];
+        m.write(&mut src, 0, 8).unwrap();
+        assert_eq!(m.get_word(0x4), 0x0405);
     }
 
     #[test]

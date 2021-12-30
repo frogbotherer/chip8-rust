@@ -124,6 +124,23 @@ impl Display for MonoTermDisplay {
     }
 }
 
+/// useful for testing non-display routines
+pub struct DummyDisplay;
+
+impl DummyDisplay {
+    #[allow(dead_code)]
+    pub fn new() -> Result<DummyDisplay, io::Error> {
+        Ok(DummyDisplay {})
+    }
+}
+
+impl Display for DummyDisplay {
+    #[allow(unused)]
+    fn draw(&mut self, data: &[u8]) -> Result<(), io::Error> {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
