@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::{time,thread};
 use std::io;
 
 use chip8::display::MonoTermDisplay;
@@ -14,10 +15,20 @@ fn main() -> Result<(), io::Error> {
     let mut f = File::open("roms/ibm_logo.ch8")?;
     interpreter.load_program(&mut f)?;
 
-    //loop {
-    //thread::sleep(time::Duration::from_millis(3000));
-    interpreter.interrupt()?;
+    for i in 0..1000 {
+        let t = interpreter.cycle()?;
+        //eprintln!("{} {:04x?} ", i, interpreter.instruction_data);
+        // 4.54us per machine cycle
+        thread::sleep(time::Duration::from_nanos(4540 * t as u64));
+
+        if i % 20 == 0 {
+            interpreter.interrupt()?;
+        }
+    }
     //display.draw(&CHIP8_TEST_CARD)?;
-    //}
+    for _ in 0..12 {
+        // shove some junk on stdout to stop the cli messing up the last frame
+        eprintln!();
+    }
     Ok(())
 }

@@ -30,7 +30,7 @@ pub struct Chip8Interpreter<'a> {
     // contains the decoded instruction and the original four bytes
     // TODO use an enum or struct instead of Option?
     instruction: Option<fn(&mut Chip8Interpreter<'a>) -> Result<usize, io::Error>>,
-    instruction_data: u16,
+    pub instruction_data: u16,
     program_counter: u16,
     vx: u16,
     vy: u16,
@@ -59,7 +59,7 @@ impl<'a> Chip8Interpreter<'a> {
             random: 0x0000,
             i: 0x0000,
             display_pointer: 0x0000,
-            state: InterpreterState::Start,
+            state: InterpreterState::FetchDecode,
         };
         i.stack_pointer = i.memory.stack_addr;
         i.program_counter = i.memory.program_addr;
@@ -73,23 +73,32 @@ impl<'a> Chip8Interpreter<'a> {
     }
 
     /// external interrupt
-    pub fn interrupt(&mut self) -> Result<(), io::Error> {
+    pub fn interrupt(&mut self) -> Result<usize, io::Error> {
         // TODO soft-code
         self.display
-            .draw(self.memory.get_ro_slice(self.display_pointer, 0x100))
+            .draw(self.memory.get_ro_slice(self.display_pointer, 0x100))?;
+
+        // if we'd been waiting for an interrupt, put the interpreter back into
+        // the Execute state, because it will have been mid-instruction
+        if self.state == InterpreterState::WaitInterrupt {
+            self.state = InterpreterState::Execute;
+        }
+        // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-interrupts/
+        Ok(807 + 1024)
     }
 
-    /// TODO
-    fn cycle(&mut self) -> Result<usize, io::Error> {
+    /// step the interpreter forward one state, returning number of machine
+    /// cycles consumed.
+    pub fn cycle(&mut self) -> Result<usize, io::Error> {
         match self.state {
             InterpreterState::FetchDecode => self.fetch_and_decode(),
             InterpreterState::Execute => self.call(),
-            _ => panic!("TODO"),
+            InterpreterState::WaitInterrupt => Ok(1),
         }
     }
 
     pub fn main_loop(&mut self) {
-        self.cycle();
+        //self.cycle();
     }
 
     /// fetch the instruction at the program counter, figure out what it is,
@@ -108,6 +117,7 @@ impl<'a> Chip8Interpreter<'a> {
             0x6000..=0x6fff => Chip8Interpreter::inst_load_vx,
             0x7000..=0x7fff => Chip8Interpreter::inst_add_to_vx,
             0xa000..=0xafff => Chip8Interpreter::inst_set_i,
+            0xd000..=0xdfff => Chip8Interpreter::inst_draw_sprite,
             _ => panic!("Failed to decode instruction {:04x?}", inst),
         });
 
@@ -126,6 +136,8 @@ impl<'a> Chip8Interpreter<'a> {
 
     /// call the most recently-decoded instruction
     fn call(&mut self) -> Result<usize, io::Error> {
+        // NB. ordering is important here because instructions can (and need
+        //     to) modify the interpreter state
         self.state = InterpreterState::FetchDecode;
         match self.instruction {
             Some(i) => i(self),
@@ -160,8 +172,93 @@ impl<'a> Chip8Interpreter<'a> {
         v[0] = (((v[0] as u16) + (self.instruction_data & 0xff)) & 0xff) as u8;
         Ok(10)
     }
+    /// dxyn
+    fn inst_draw_sprite(&mut self) -> Result<usize, io::Error> {
+        //
+        //  x_bit_offset
+        // -->|                       (work ram contents)
+        //    .xxxxx...  |            ....xxxx x.......
+        //    x.....x..  |            ...x.... .x......
+        //    x.x.x.x..  | rows  ==>  ...x.x.x .x......
+        //    x.....x..  v            ...x.... .x......
+        //    .x.x.x...  -            ....x.x. x.......
+        //
+        // bit offset from byte margin
+        let x_bit_offset = self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0] & 0x7;
+
+        // number of rows in the sprite
+        let rows = self.instruction_data & 0xf;
+
+        // data to draw (copied to a vec to avoid shenanigans with borrowing)
+        let sprite = self.memory.get_ro_slice(self.i, rows as usize).to_vec();
+
+        // writable work area
+        let work = self.memory.get_rw_slice(self.memory.work_addr, 32);
+
+        // write a correctly left-shifted version of the sprite into the work area
+        for (idx, byte) in sprite.iter().enumerate() {
+            work[idx * 2] = byte >> x_bit_offset;
+            work[idx * 2 + 1] = if x_bit_offset == 0 { 0x0 } else { byte << (8 - x_bit_offset) };
+        }
+
+        // wait for the next display interrupt
+        self.state = InterpreterState::WaitInterrupt;
+        self.instruction = Some(Chip8Interpreter::inst_draw_sprite_pt2);
+
+        // duration is [ROUGHLY!]
+        //     25 for preamble
+        //   + 10 * (rows * x_bit_offset) for instructions for offsetting
+        //   + 7 * (rows) for each row
+        //   + 1 for the interrupt wait instruction
+        Ok((26 + 10 * rows * (x_bit_offset as u16) + 7 * rows) as usize)
+    }
+    /// dxyn (after the interrupt)
+    fn inst_draw_sprite_pt2(&mut self) -> Result<usize, io::Error> {
+        // display x and y coords (in bits) (again)
+        // TODO these are hard-wired to CHIP-8 display dimensions
+        let vx_val = 0x3f & self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0] as usize;
+        let vy_val = 0x1f & self.memory.get_ro_slice(self.memory.var_addr + self.vy, 1)[0] as usize;
+
+        // address to start drawing sprite in memory
+        let draw_addr = vx_val / 8 // x byte offset
+                      + vy_val * 8; // y byte offset
+
+        // readable work area
+        let work = self.memory.get_ro_slice(self.memory.work_addr, 32).to_vec();
+
+        // writable vram
+        // TODO soft-code size
+        let vram = self.memory.get_rw_slice(self.memory.display_addr, 0x100);
+
+        // collision flag (gets written to VF when done)
+        let mut collision_flag: u8 = 0;
+
+        // iterate thru pairs of bytes, looking for collisions and whether (for
+        // the right-hand byte) they can be displayed or not.
+        for (idx, byte) in work.iter().enumerate() {
+            // TODO [again] this 8-byte stride is hard-coded to the width of the screen
+            let this_addr = draw_addr + (idx / 2) * 0x8 + idx % 2;
+            if this_addr > vram.len() {
+                // drawing off the bottom of the screen
+                continue;
+            }
+            if idx % 2 == 1 && (this_addr & 0x3f) == 0 { // TODO and this
+                // right-hand byte hangs off the edge of the screen
+                continue;
+            }
+            if vram[this_addr] & *byte != *byte {
+                collision_flag = 1;
+            }
+            vram[this_addr] ^= byte;
+        }
+
+        // save the collision flag in VF
+        self.memory.write(&[collision_flag], self.memory.var_addr + 0xf, 1)?;
+
+        Ok(1)
+    }
+
     /// annn
-    // see https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
     fn inst_set_i(&mut self) -> Result<usize, io::Error> {
         self.i = self.instruction_data & 0xfff;
         Ok(12)
@@ -182,7 +279,6 @@ impl<'a> Chip8Interpreter<'a> {
 /// |                      `---------------'
 #[derive(PartialEq)]
 enum InterpreterState {
-    Start,
     FetchDecode,
     Execute,
     WaitInterrupt, // waiting for an interrupt
@@ -401,5 +497,24 @@ mod tests {
             assert_eq!(t, 12);
             Ok(())
         })
+    }
+
+    #[test]
+    fn test_dxyn_waits() -> Result<(), io::Error> {
+        // dxyn
+        test_with(|i| {
+            let mut m: &[u8] = &[0xd0, 0x08];
+            i.load_program(&mut m)?;
+
+            // call d008
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_draw_sprite()?;
+
+            assert!(i.state == InterpreterState::WaitInterrupt);
+            assert_eq!(i.instruction_data, 0xd008);
+            //assert_eq!(i.instruction, Some(Chip8Interpreter::inst_draw_sprite_pt2));
+            assert_eq!(t, 82);
+            Ok(())
+       })
     }
 }
