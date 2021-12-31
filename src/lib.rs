@@ -55,5 +55,6 @@ pub mod display;
 ///
 /// * ROMs: https://github.com/dmatlack/chip8/tree/master/roms
 /// * COSMAC details: https://laurencescotford.com/chip-8-on-the-cosmac-vip-index/
+/// * variations: https://chip-8.github.io/extensions/
 pub mod interpreter;
 pub mod memory;
