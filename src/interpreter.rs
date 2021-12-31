@@ -198,7 +198,11 @@ impl<'a> Chip8Interpreter<'a> {
         // write a correctly left-shifted version of the sprite into the work area
         for (idx, byte) in sprite.iter().enumerate() {
             work[idx * 2] = byte >> x_bit_offset;
-            work[idx * 2 + 1] = if x_bit_offset == 0 { 0x0 } else { byte << (8 - x_bit_offset) };
+            work[idx * 2 + 1] = if x_bit_offset == 0 {
+                0x0
+            } else {
+                byte << (8 - x_bit_offset)
+            };
         }
 
         // wait for the next display interrupt
@@ -242,7 +246,8 @@ impl<'a> Chip8Interpreter<'a> {
                 // drawing off the bottom of the screen
                 continue;
             }
-            if idx % 2 == 1 && (this_addr & 0x3f) == 0 { // TODO and this
+            if idx % 2 == 1 && (this_addr & 0x3f) == 0 {
+                // TODO and this
                 // right-hand byte hangs off the edge of the screen
                 continue;
             }
@@ -253,7 +258,8 @@ impl<'a> Chip8Interpreter<'a> {
         }
 
         // save the collision flag in VF
-        self.memory.write(&[collision_flag], self.memory.var_addr + 0xf, 1)?;
+        self.memory
+            .write(&[collision_flag], self.memory.var_addr + 0xf, 1)?;
 
         Ok(1)
     }
@@ -515,6 +521,6 @@ mod tests {
             //assert_eq!(i.instruction, Some(Chip8Interpreter::inst_draw_sprite_pt2));
             assert_eq!(t, 82);
             Ok(())
-       })
+        })
     }
 }

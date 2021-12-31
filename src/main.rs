@@ -1,6 +1,6 @@
 use std::fs::File;
-use std::{time,thread};
 use std::io;
+use std::{thread, time};
 
 use chip8::display::MonoTermDisplay;
 use chip8::interpreter::Chip8Interpreter;
