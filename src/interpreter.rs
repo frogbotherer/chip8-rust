@@ -190,8 +190,10 @@ impl<'a> Chip8Interpreter<'a> {
             0x2000..=0x2fff => Chip8Interpreter::inst_subroutine,
             0x3000..=0x3fff => Chip8Interpreter::inst_skip_vx_eq,
             0x4000..=0x4fff => Chip8Interpreter::inst_skip_vx_ne,
+            0x5000..=0x5fff => Chip8Interpreter::inst_x_eq_y,
             0x6000..=0x6fff => Chip8Interpreter::inst_load_vx,
             0x7000..=0x7fff => Chip8Interpreter::inst_add_to_vx,
+            0x9000..=0x9fff => Chip8Interpreter::inst_x_ne_y,
             0xa000..=0xafff => Chip8Interpreter::inst_set_i,
             0xb000..=0xbfff => Chip8Interpreter::inst_jump_with_offset,
             0xd000..=0xdfff => Chip8Interpreter::inst_draw_sprite,
@@ -282,6 +284,18 @@ impl<'a> Chip8Interpreter<'a> {
         }
     }
 
+    /// 5xy0
+    fn inst_x_eq_y(&mut self) -> Result<usize, io::Error> {
+        let lhs = self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0];
+        let rhs = self.memory.get_ro_slice(self.memory.var_addr + self.vy, 1)[0];
+        if lhs == rhs {
+            self.program_counter += 2;
+            Ok(18)
+        } else {
+            Ok(14)
+        }
+    }
+
     /// 6xnn
     fn inst_load_vx(&mut self) -> Result<usize, io::Error> {
         self.memory.write(
@@ -297,6 +311,18 @@ impl<'a> Chip8Interpreter<'a> {
         let v = self.memory.get_rw_slice(self.memory.var_addr + self.vx, 1);
         v[0] = (((v[0] as u16) + (self.instruction_data & 0xff)) & 0xff) as u8;
         Ok(10)
+    }
+
+    /// 9xy0
+    fn inst_x_ne_y(&mut self) -> Result<usize, io::Error> {
+        let lhs = self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0];
+        let rhs = self.memory.get_ro_slice(self.memory.var_addr + self.vy, 1)[0];
+        if lhs != rhs {
+            self.program_counter += 2;
+            Ok(18)
+        } else {
+            Ok(14)
+        }
     }
 
     /// bnnn
@@ -654,7 +680,7 @@ mod tests {
             i.load_program(&mut m)?;
             i.memory.write(&[0x56], 0xef4, 1)?;
 
-            // call 3456
+            // call 4467
             let _ = i.fetch_and_decode()?;
             let t = i.inst_skip_vx_ne()?;
 
@@ -673,7 +699,7 @@ mod tests {
             i.load_program(&mut m)?;
             i.memory.write(&[0x67], 0xef4, 1)?;
 
-            // call 3456
+            // call 4467
             let _ = i.fetch_and_decode()?;
             let t = i.inst_skip_vx_ne()?;
 
@@ -681,6 +707,82 @@ mod tests {
             // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-skip-instructions/
             // takes 10 cycles
             assert_eq!(t, 10);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_skip_x_eq_y_ok() -> Result<(), io::Error> {
+        test_with(|i| {
+            let mut m: &[u8] = &[0x54, 0x50];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x56, 0x56], 0xef4, 2)?;
+
+            // call 5450
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_x_eq_y()?;
+
+            assert_eq!(i.program_counter, 0x204);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-skip-instructions/
+            // takes 18 cycles
+            assert_eq!(t, 18);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_skip_x_eq_y_not() -> Result<(), io::Error> {
+        test_with(|i| {
+            let mut m: &[u8] = &[0x54, 0x50];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x57, 0x56], 0xef4, 2)?;
+
+            // call 5450
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_x_eq_y()?;
+
+            assert_eq!(i.program_counter, 0x202);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-skip-instructions/
+            // takes 14 cycles
+            assert_eq!(t, 14);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_skip_x_ne_y_ok() -> Result<(), io::Error> {
+        test_with(|i| {
+            let mut m: &[u8] = &[0x94, 0x50];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x56, 0x57], 0xef4, 2)?;
+
+            // call 9450
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_x_ne_y()?;
+
+            assert_eq!(i.program_counter, 0x204);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-skip-instructions/
+            // takes 18 cycles
+            assert_eq!(t, 18);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_skip_x_ne_y_not() -> Result<(), io::Error> {
+        test_with(|i| {
+            let mut m: &[u8] = &[0x94, 0x50];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x67, 0x67], 0xef4, 2)?;
+
+            // call 9450
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_x_ne_y()?;
+
+            assert_eq!(i.program_counter, 0x202);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-skip-instructions/
+            // takes 14 cycles
+            assert_eq!(t, 14);
             Ok(())
         })
     }
