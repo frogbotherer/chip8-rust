@@ -191,6 +191,7 @@ impl<'a> Chip8Interpreter<'a> {
             0x6000..=0x6fff => Chip8Interpreter::inst_load_vx,
             0x7000..=0x7fff => Chip8Interpreter::inst_add_to_vx,
             0xa000..=0xafff => Chip8Interpreter::inst_set_i,
+            0xb000..=0xbfff => Chip8Interpreter::inst_jump_with_offset,
             0xd000..=0xdfff => Chip8Interpreter::inst_draw_sprite,
             _ => panic!("Failed to decode instruction {:04x?}", inst),
         });
@@ -270,6 +271,19 @@ impl<'a> Chip8Interpreter<'a> {
         let v = self.memory.get_rw_slice(self.memory.var_addr + self.vx, 1);
         v[0] = (((v[0] as u16) + (self.instruction_data & 0xff)) & 0xff) as u8;
         Ok(10)
+    }
+
+    /// bnnn
+    fn inst_jump_with_offset(&mut self) -> Result<usize, io::Error> {
+        // TODO CHIP-48 and SUPERCHIP variants
+        let offset = self.memory.get_ro_slice(self.memory.var_addr, 1)[0] as u16; // add self.vx for variations
+        self.program_counter = (self.instruction_data & 0xfff) + offset;
+        if self.instruction_data & 0xf00 != self.program_counter & 0xf00 {
+            // crosses a page boundary
+            Ok(24)
+        } else {
+            Ok(22)
+        }
     }
 
     /// dxyn
@@ -654,6 +668,46 @@ mod tests {
             // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
             // takes 12 cycles
             assert_eq!(t, 12);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_jump_offset() -> Result<(), io::Error> {
+        // bnnn
+        test_with(|i| {
+            let mut m: &[u8] = &[0xb1, 0x23];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x40], 0xef0, 1)?;
+
+            // call b123
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_jump_with_offset()?;
+
+            assert_eq!(i.program_counter, 0x163);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
+            // takes 22 cycles within a page
+            assert_eq!(t, 22);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_jump_offset_across_pages() -> Result<(), io::Error> {
+        // bnnn
+        test_with(|i| {
+            let mut m: &[u8] = &[0xb1, 0x23];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0xdd], 0xef0, 1)?;
+
+            // call b123
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_jump_with_offset()?;
+
+            assert_eq!(i.program_counter, 0x200);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
+            // takes 24 cycles across pages
+            assert_eq!(t, 24);
             Ok(())
         })
     }
