@@ -4,7 +4,7 @@ use tui::backend::TermionBackend;
 use tui::layout::Rect;
 use tui::style::{Color, Style};
 use tui::symbols::Marker;
-use tui::widgets::canvas::Canvas;
+use tui::widgets::canvas::{Canvas, Points};
 use tui::widgets::{Block, Borders};
 use tui::Terminal;
 
@@ -56,6 +56,31 @@ impl Resolution {
                         if bit == 1 { Color::White } else { Color::Black },
                     ))
                 }
+            }
+        })
+    }
+    fn bitplane_from_data<'a>(
+        &self,
+        data: &'a [u8],
+        bitplane: u8,
+    ) -> impl std::iter::Iterator<Item = (f64, f64)> + 'a {
+        let mut count = self.pixel_count();
+        let w = self.0;
+        let mut bit = 0;
+        std::iter::from_fn(move || {
+            while count > 0 {
+                count -= 1;
+                bit = 1 & (data[count / 8] >> (7 - count % 8));
+                if bit == bitplane {
+                    break;
+                }
+            }
+            match count {
+                0 => None,
+                _ => Some((
+                    (count % w) as f64,        // x
+                    -1.0 * (count / w) as f64, // y
+                )),
             }
         })
     }
@@ -112,14 +137,24 @@ impl Display for MonoTermDisplay {
                 )
                 .x_bounds(self.resolution.x_bounds())
                 .y_bounds(self.resolution.y_bounds())
-                .marker(Marker::Braille)
+                .marker(Marker::Block) //Braille
                 .paint(|ctx| {
-                    // expand bitplane into x, y float coords, suitable for
-                    // rendering with TUI. this just prints unicode blocks of
-                    // text for now
-                    for (x, y, c) in self.resolution.points_from_data(&data) {
-                        ctx.print(x, y, "\u{2588}", c);
-                    }
+                    // expand each bitplane into x, y float coords, suitable for
+                    // rendering with TUI. this just prints blocky points for now
+                    ctx.draw(&Points {
+                        coords: &self
+                            .resolution
+                            .bitplane_from_data(&data, 0)
+                            .collect::<Vec<_>>(),
+                        color: Color::Black,
+                    });
+                    ctx.draw(&Points {
+                        coords: &self
+                            .resolution
+                            .bitplane_from_data(&data, 1)
+                            .collect::<Vec<_>>(),
+                        color: Color::White,
+                    });
                 });
             f.render_widget(canvas, size);
         })?;
