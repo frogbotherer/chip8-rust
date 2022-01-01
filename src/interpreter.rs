@@ -186,6 +186,7 @@ impl<'a> Chip8Interpreter<'a> {
         self.instruction = Some(match inst {
             0x00e0 => Chip8Interpreter::inst_clear_screen,
             0x1000..=0x1fff => Chip8Interpreter::inst_branch,
+            0x2000..=0x2fff => Chip8Interpreter::inst_subroutine,
             0x6000..=0x6fff => Chip8Interpreter::inst_load_vx,
             0x7000..=0x7fff => Chip8Interpreter::inst_add_to_vx,
             0xa000..=0xafff => Chip8Interpreter::inst_set_i,
@@ -228,6 +229,20 @@ impl<'a> Chip8Interpreter<'a> {
     fn inst_branch(&mut self) -> Result<usize, io::Error> {
         self.program_counter = self.instruction_data & 0xfff;
         Ok(12)
+    }
+    /// 2nnn
+    fn inst_subroutine(&mut self) -> Result<usize, io::Error> {
+        self.memory.write(
+            &[
+                (self.program_counter >> 8) as u8,
+                (self.program_counter & 0xff) as u8,
+            ],
+            self.stack_pointer,
+            2,
+        )?;
+        self.stack_pointer -= 2;
+        self.program_counter = self.instruction_data & 0xfff;
+        Ok(26)
     }
     /// 6xnn
     fn inst_load_vx(&mut self) -> Result<usize, io::Error> {
@@ -494,6 +509,26 @@ mod tests {
             // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
             // takes 12 cycles
             assert_eq!(t, 12);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_subroutine() -> Result<(), io::Error> {
+        test_with(|i| {
+            let mut m: &[u8] = &[0x23, 0x45];
+            i.load_program(&mut m)?;
+
+            // call 2345
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_subroutine()?;
+
+            assert_eq!(i.memory.get_ro_slice(0xece, 2), &[0x02, 0x02]);
+            assert_eq!(i.stack_pointer, 0xecc);
+            assert_eq!(i.program_counter, 0x345);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
+            // takes 26 cycles
+            assert_eq!(t, 26);
             Ok(())
         })
     }

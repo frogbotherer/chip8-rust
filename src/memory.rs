@@ -77,7 +77,7 @@ impl MemoryMap for Chip8MemoryMap {
 const CHIP8_RAM_SIZE_BYTES: u16 = 4096;
 
 /// offsets from the top of RAM
-const CHIP8_STACK_OFFSET: u16 = 0x0131; // not! 0x0160; stack grows downward into real memory
+const CHIP8_STACK_OFFSET: u16 = 0x0132; // not! 0x0160; stack grows downward into real memory
 const CHIP8_WORK_OFFSET: u16 = 0x0130;
 const CHIP8_VAR_OFFSET: u16 = 0x0110;
 const CHIP8_DISPLAY_OFFSET: u16 = 0x100;
@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn test_mem_layout() {
         let m = Chip8MemoryMap::new().unwrap();
-        assert_eq!(m.stack_addr, 0x0ecf);
+        assert_eq!(m.stack_addr, 0x0ece);
         assert_eq!(m.work_addr, 0x0ed0);
         assert_eq!(m.var_addr, 0x0ef0);
         assert_eq!(m.display_addr, 0x0f00);
