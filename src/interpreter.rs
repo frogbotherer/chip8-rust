@@ -188,6 +188,8 @@ impl<'a> Chip8Interpreter<'a> {
             0x00ee => Chip8Interpreter::inst_ret,
             0x1000..=0x1fff => Chip8Interpreter::inst_branch,
             0x2000..=0x2fff => Chip8Interpreter::inst_subroutine,
+            0x3000..=0x3fff => Chip8Interpreter::inst_skip_vx_eq,
+            0x4000..=0x4fff => Chip8Interpreter::inst_skip_vx_ne,
             0x6000..=0x6fff => Chip8Interpreter::inst_load_vx,
             0x7000..=0x7fff => Chip8Interpreter::inst_add_to_vx,
             0xa000..=0xafff => Chip8Interpreter::inst_set_i,
@@ -254,6 +256,30 @@ impl<'a> Chip8Interpreter<'a> {
         self.stack_pointer -= 2;
         self.program_counter = self.instruction_data & 0xfff;
         Ok(26)
+    }
+
+    /// 3xnn
+    fn inst_skip_vx_eq(&mut self) -> Result<usize, io::Error> {
+        let lhs = self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0];
+        let rhs = 0xff & self.instruction_data as u8;
+        if lhs == rhs {
+            self.program_counter += 2;
+            Ok(14)
+        } else {
+            Ok(10)
+        }
+    }
+
+    /// 4xnn
+    fn inst_skip_vx_ne(&mut self) -> Result<usize, io::Error> {
+        let lhs = self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0];
+        let rhs = 0xff & self.instruction_data as u8;
+        if lhs != rhs {
+            self.program_counter += 2;
+            Ok(14)
+        } else {
+            Ok(10)
+        }
     }
 
     /// 6xnn
@@ -577,6 +603,82 @@ mod tests {
             assert_eq!(i.stack_pointer, 0xece);
             assert_eq!(i.program_counter, 0x202);
             // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
+            // takes 10 cycles
+            assert_eq!(t, 10);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_skip_vx_eq_ok() -> Result<(), io::Error> {
+        test_with(|i| {
+            let mut m: &[u8] = &[0x34, 0x56];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x56], 0xef4, 1)?;
+
+            // call 3456
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_skip_vx_eq()?;
+
+            assert_eq!(i.program_counter, 0x204);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-skip-instructions/
+            // takes 14 cycles
+            assert_eq!(t, 14);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_skip_vx_eq_not() -> Result<(), io::Error> {
+        test_with(|i| {
+            let mut m: &[u8] = &[0x34, 0x56];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x57], 0xef4, 1)?;
+
+            // call 3456
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_skip_vx_eq()?;
+
+            assert_eq!(i.program_counter, 0x202);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-skip-instructions/
+            // takes 10 cycles
+            assert_eq!(t, 10);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_skip_vx_ne_ok() -> Result<(), io::Error> {
+        test_with(|i| {
+            let mut m: &[u8] = &[0x44, 0x67];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x56], 0xef4, 1)?;
+
+            // call 3456
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_skip_vx_ne()?;
+
+            assert_eq!(i.program_counter, 0x204);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-skip-instructions/
+            // takes 14 cycles
+            assert_eq!(t, 14);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_skip_vx_ne_not() -> Result<(), io::Error> {
+        test_with(|i| {
+            let mut m: &[u8] = &[0x44, 0x67];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x67], 0xef4, 1)?;
+
+            // call 3456
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_skip_vx_ne()?;
+
+            assert_eq!(i.program_counter, 0x202);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-skip-instructions/
             // takes 10 cycles
             assert_eq!(t, 10);
             Ok(())
