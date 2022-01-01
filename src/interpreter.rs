@@ -21,7 +21,10 @@
 ///  X (4bit register) for "           "     "  R0-F is a pointer to a RAM address
 /// ... yes P and X can be set to the same register. yes we can ignore them.
 use crate::{display, memory, memory::MemoryMap};
-use std::io;
+use std::{io, thread, time};
+
+const CHIP8_TARGET_FREQ_NS: u64 = 1_000_000_000 / 60; // 60 fps
+const CHIP8_CYCLE_NS: u64 = 4540; // 4.54 us
 
 pub struct Chip8Interpreter<'a> {
     memory: memory::Chip8MemoryMap,
@@ -89,7 +92,7 @@ impl<'a> Chip8Interpreter<'a> {
 
     /// step the interpreter forward one state, returning number of machine
     /// cycles consumed.
-    pub fn cycle(&mut self) -> Result<usize, io::Error> {
+    fn cycle(&mut self) -> Result<usize, io::Error> {
         match self.state {
             InterpreterState::FetchDecode => self.fetch_and_decode(),
             InterpreterState::Execute => self.call(),
@@ -97,8 +100,73 @@ impl<'a> Chip8Interpreter<'a> {
         }
     }
 
-    pub fn main_loop(&mut self) {
-        //self.cycle();
+    /// run the main interpreter loop, including timing and interrupts
+    pub fn main_loop(&mut self, frame_count: usize) -> Result<(), io::Error> {
+        let mut remaining_sleep = time::Duration::from_nanos(0);
+
+        // loop of frames
+        for frame in 0..frame_count {
+            // |c......................................................|
+            //  ^-now                                                  ^-frame end
+            let mut now = time::Instant::now();
+            let frame_end = now + time::Duration::from_nanos(CHIP8_TARGET_FREQ_NS);
+
+            // interrupt at the top of the loop, so that the time spent in the
+            // isr is inside the frame (rather than frame.time->isr.time->frame.time->etc.)
+            let t = self.interrupt()?;
+
+            // how long we should sleep for, for the interrupt
+            let inst_end = now + time::Duration::from_nanos(CHIP8_CYCLE_NS * t as u64) + remaining_sleep;
+            now = time::Instant::now();
+            // |..c.....|..............................................|
+            //    ^-now ^-inst_end                                     ^-frame end
+
+            if inst_end >= now {
+                thread::sleep(inst_end - now);
+            }
+            else
+            {
+                eprintln!("{:09?}: Warning: ISR took longer than COSMAC by {:?}", frame, now - inst_end);
+            }
+            // |........|c.............................................|
+            //    ^-now ^-inst_end                                     ^-frame end
+
+            // loop of instructions within each frame
+            loop {
+                now = time::Instant::now();
+                let t = self.cycle()?;
+                // |........|..c...........................................|
+                //           ^-now                                         ^-frame end
+
+                // how long we should sleep until
+                let inst_end = now + time::Duration::from_nanos(CHIP8_CYCLE_NS * t as u64);
+                now = time::Instant::now();
+                // |........|..c.....|.....................................|
+                //             ^-now ^-inst_end                            ^-frame end
+
+                // if we would sleep past the end of the frame, store the
+                // remainder and interrupt
+                if inst_end >= frame_end {
+                    remaining_sleep = inst_end - frame_end;
+                    // we can legitimately overrun the end of the frame during the instruction
+                    if frame_end >= now {
+                        thread::sleep(frame_end - now);
+                    }
+                    break;
+                }
+                else
+                {
+                    if inst_end >= now {
+                        thread::sleep(inst_end - now);
+                    }
+                    else
+                    {
+                        eprintln!("{:09?}: Warning: {:04x?} took longer than COSMAC by {:?}", frame, self.instruction_data, now - inst_end);
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// fetch the instruction at the program counter, figure out what it is,
@@ -218,6 +286,8 @@ impl<'a> Chip8Interpreter<'a> {
     }
     /// dxyn (after the interrupt)
     fn inst_draw_sprite_pt2(&mut self) -> Result<usize, io::Error> {
+        let mut dur = 12;
+
         // display x and y coords (in bits) (again)
         // TODO these are hard-wired to CHIP-8 display dimensions
         let vx_val = 0x3f & self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0] as usize;
@@ -253,15 +323,23 @@ impl<'a> Chip8Interpreter<'a> {
             }
             if vram[this_addr] & *byte != *byte {
                 collision_flag = 1;
+                dur += 2;
             }
             vram[this_addr] ^= byte;
+            dur += if idx % 2 == 0 { 17 } else { 8 }
         }
 
         // save the collision flag in VF
         self.memory
             .write(&[collision_flag], self.memory.var_addr + 0xf, 1)?;
 
-        Ok(1)
+        // duration is:
+        //    (6+6) for preamble/postamble
+        //  + (6+6+5) * rows for left byte
+        //  + 2 * rows for lbyte collision
+        //  + (4 + 4) * rows for right byte (if visible)
+        //  + 2 * rows for rbyte collision
+        Ok(dur)
     }
 
     /// annn
@@ -509,17 +587,65 @@ mod tests {
     fn test_dxyn_waits() -> Result<(), io::Error> {
         // dxyn
         test_with(|i| {
-            let mut m: &[u8] = &[0xd0, 0x08];
+            let mut m: &[u8] = &[0xa2, 0x06, 0x60, 0x04, 0xd0, 0x05, 0xf0, 0x78, 0x3c, 0x1e, 0x0f];
             i.load_program(&mut m)?;
 
             // call d008
-            let _ = i.fetch_and_decode()?;
+            for _ in 0..6 {
+                i.cycle()?;
+            }
             let t = i.inst_draw_sprite()?;
 
             assert!(i.state == InterpreterState::WaitInterrupt);
-            assert_eq!(i.instruction_data, 0xd008);
+            assert_eq!(i.instruction_data, 0xd005);
             //assert_eq!(i.instruction, Some(Chip8Interpreter::inst_draw_sprite_pt2));
-            assert_eq!(t, 82);
+            //
+            // xxxx....      ....xxxx ........
+            // .xxxx...      .....xxx x.......
+            // ..xxxx..  ==> ......xx xx......
+            // ...xxxx.      .......x xxx.....
+            // ....xxxx      ........ xxxx....
+            assert_eq!(
+                i.memory.get_ro_slice(0xed0, 32),
+                &[0x0f, 0x00, 0x07, 0x80, 0x03, 0xc0, 0x01, 0xe0, 0x00, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+            );
+
+            assert_eq!(t, 261);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_dxyn_pt2() -> Result<(), io::Error> {
+        // dxyn
+        test_with(|i| {
+            let mut m: &[u8] = &[0xa2, 0x06, 0x60, 0x04, 0xd0, 0x05, 0xf0, 0x78, 0x3c, 0x1e, 0x0f];
+            i.load_program(&mut m)?;
+
+            // write a colliding px into vram to test collision bit
+            i.memory.write(&[0x08], 0xf20, 1)?;
+
+            // call d008
+            for _ in 0..7 {
+                i.cycle()?;
+            }
+            let t = i.inst_draw_sprite_pt2()?;
+
+            assert_eq!(
+                // 5 rows of vram across where the sprite should be
+                i.memory.get_ro_slice(0xf20, 0x28),
+                &[0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                  0x07, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                  0x03, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                  0x01, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                  0x00, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+            );
+
+            // vf == 1
+            assert_eq!(i.memory.get_ro_slice(0xeff, 1)[0], 1);
+
+            assert_eq!(t, 428);
             Ok(())
         })
     }
