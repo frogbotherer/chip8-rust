@@ -185,6 +185,7 @@ impl<'a> Chip8Interpreter<'a> {
 
         self.instruction = Some(match inst {
             0x00e0 => Chip8Interpreter::inst_clear_screen,
+            0x00ee => Chip8Interpreter::inst_ret,
             0x1000..=0x1fff => Chip8Interpreter::inst_branch,
             0x2000..=0x2fff => Chip8Interpreter::inst_subroutine,
             0x6000..=0x6fff => Chip8Interpreter::inst_load_vx,
@@ -225,11 +226,20 @@ impl<'a> Chip8Interpreter<'a> {
             .write(&[0; 0x0100], self.display_pointer, 0x0100)?;
         Ok(24)
     }
+
+    /// 00ee
+    fn inst_ret(&mut self) -> Result<usize, io::Error> {
+        self.stack_pointer += 2;
+        self.program_counter = self.memory.get_word(self.stack_pointer);
+        Ok(10)
+    }
+
     /// 1nnn
     fn inst_branch(&mut self) -> Result<usize, io::Error> {
         self.program_counter = self.instruction_data & 0xfff;
         Ok(12)
     }
+
     /// 2nnn
     fn inst_subroutine(&mut self) -> Result<usize, io::Error> {
         self.memory.write(
@@ -244,6 +254,7 @@ impl<'a> Chip8Interpreter<'a> {
         self.program_counter = self.instruction_data & 0xfff;
         Ok(26)
     }
+
     /// 6xnn
     fn inst_load_vx(&mut self) -> Result<usize, io::Error> {
         self.memory.write(
@@ -253,12 +264,14 @@ impl<'a> Chip8Interpreter<'a> {
         )?;
         Ok(6)
     }
+
     /// 7xnn
     fn inst_add_to_vx(&mut self) -> Result<usize, io::Error> {
         let v = self.memory.get_rw_slice(self.memory.var_addr + self.vx, 1);
         v[0] = (((v[0] as u16) + (self.instruction_data & 0xff)) & 0xff) as u8;
         Ok(10)
     }
+
     /// dxyn
     fn inst_draw_sprite(&mut self) -> Result<usize, io::Error> {
         //
@@ -303,6 +316,7 @@ impl<'a> Chip8Interpreter<'a> {
         //   + 1 for the interrupt wait instruction
         Ok((26 + 10 * rows * (x_bit_offset as u16) + 7 * rows) as usize)
     }
+
     /// dxyn (after the interrupt)
     fn inst_draw_sprite_pt2(&mut self) -> Result<usize, io::Error> {
         let mut dur = 12;
@@ -529,6 +543,28 @@ mod tests {
             // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
             // takes 26 cycles
             assert_eq!(t, 26);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_ret() -> Result<(), io::Error> {
+        test_with(|i| {
+            let mut m: &[u8] = &[0x22, 0x04, 0x00, 0xe0, 0x00, 0xee];
+            i.load_program(&mut m)?;
+
+            // call 2345
+            let _ = i.fetch_and_decode()?;
+            let _ = i.call()?;
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_ret()?;
+
+            assert_eq!(i.memory.get_ro_slice(0xece, 2), &[0x02, 0x02]);
+            assert_eq!(i.stack_pointer, 0xece);
+            assert_eq!(i.program_counter, 0x202);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
+            // takes 10 cycles
+            assert_eq!(t, 10);
             Ok(())
         })
     }
