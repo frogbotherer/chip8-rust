@@ -38,6 +38,7 @@ impl Resolution {
         [-1.0 * (self.1 - 1) as f64, 0.0]
     }
 
+    #[allow(dead_code)]
     fn points_from_data<'a>(
         &self,
         data: &'a [u8],
@@ -66,11 +67,10 @@ impl Resolution {
     ) -> impl std::iter::Iterator<Item = (f64, f64)> + 'a {
         let mut count = self.pixel_count();
         let w = self.0;
-        let mut bit = 0;
         std::iter::from_fn(move || {
             while count > 0 {
                 count -= 1;
-                bit = 1 & (data[count / 8] >> (7 - count % 8));
+                let bit = 1 & (data[count / 8] >> (7 - count % 8));
                 if bit == bitplane {
                     break;
                 }
