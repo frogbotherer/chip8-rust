@@ -116,17 +116,20 @@ impl<'a> Chip8Interpreter<'a> {
             let t = self.interrupt()?;
 
             // how long we should sleep for, for the interrupt
-            let inst_end = now + time::Duration::from_nanos(CHIP8_CYCLE_NS * t as u64) + remaining_sleep;
+            let inst_end =
+                now + time::Duration::from_nanos(CHIP8_CYCLE_NS * t as u64) + remaining_sleep;
             now = time::Instant::now();
             // |..c.....|..............................................|
             //    ^-now ^-inst_end                                     ^-frame end
 
             if inst_end >= now {
                 thread::sleep(inst_end - now);
-            }
-            else
-            {
-                eprintln!("{:09?}: Warning: ISR took longer than COSMAC by {:?}", frame, now - inst_end);
+            } else {
+                eprintln!(
+                    "{:09?}: Warning: ISR took longer than COSMAC by {:?}",
+                    frame,
+                    now - inst_end
+                );
             }
             // |........|c.............................................|
             //    ^-now ^-inst_end                                     ^-frame end
@@ -153,15 +156,16 @@ impl<'a> Chip8Interpreter<'a> {
                         thread::sleep(frame_end - now);
                     }
                     break;
-                }
-                else
-                {
+                } else {
                     if inst_end >= now {
                         thread::sleep(inst_end - now);
-                    }
-                    else
-                    {
-                        eprintln!("{:09?}: Warning: {:04x?} took longer than COSMAC by {:?}", frame, self.instruction_data, now - inst_end);
+                    } else {
+                        eprintln!(
+                            "{:09?}: Warning: {:04x?} took longer than COSMAC by {:?}",
+                            frame,
+                            self.instruction_data,
+                            now - inst_end
+                        );
                     }
                 }
             }
@@ -587,7 +591,9 @@ mod tests {
     fn test_dxyn_waits() -> Result<(), io::Error> {
         // dxyn
         test_with(|i| {
-            let mut m: &[u8] = &[0xa2, 0x06, 0x60, 0x04, 0xd0, 0x05, 0xf0, 0x78, 0x3c, 0x1e, 0x0f];
+            let mut m: &[u8] = &[
+                0xa2, 0x06, 0x60, 0x04, 0xd0, 0x05, 0xf0, 0x78, 0x3c, 0x1e, 0x0f,
+            ];
             i.load_program(&mut m)?;
 
             // call d008
@@ -607,8 +613,11 @@ mod tests {
             // ....xxxx      ........ xxxx....
             assert_eq!(
                 i.memory.get_ro_slice(0xed0, 32),
-                &[0x0f, 0x00, 0x07, 0x80, 0x03, 0xc0, 0x01, 0xe0, 0x00, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+                &[
+                    0x0f, 0x00, 0x07, 0x80, 0x03, 0xc0, 0x01, 0xe0, 0x00, 0xf0, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+                ]
             );
 
             assert_eq!(t, 261);
@@ -620,7 +629,9 @@ mod tests {
     fn test_dxyn_pt2() -> Result<(), io::Error> {
         // dxyn
         test_with(|i| {
-            let mut m: &[u8] = &[0xa2, 0x06, 0x60, 0x04, 0xd0, 0x05, 0xf0, 0x78, 0x3c, 0x1e, 0x0f];
+            let mut m: &[u8] = &[
+                0xa2, 0x06, 0x60, 0x04, 0xd0, 0x05, 0xf0, 0x78, 0x3c, 0x1e, 0x0f,
+            ];
             i.load_program(&mut m)?;
 
             // write a colliding px into vram to test collision bit
@@ -635,11 +646,12 @@ mod tests {
             assert_eq!(
                 // 5 rows of vram across where the sprite should be
                 i.memory.get_ro_slice(0xf20, 0x28),
-                &[0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                  0x07, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                  0x03, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                  0x01, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                  0x00, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+                &[
+                    0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0x80, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x03, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xe0,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00
+                ]
             );
 
             // vf == 1
