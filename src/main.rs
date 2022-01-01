@@ -15,6 +15,9 @@ fn main() -> Result<(), io::Error> {
     interpreter.load_program(&mut f)?;
     interpreter.main_loop(300)?;
 
+    // test card for the display
+    //display.test_card()?;
+
     // shove some junk on stdout to stop the cli messing up the last frame
     for _ in 0..12 {
         println!();

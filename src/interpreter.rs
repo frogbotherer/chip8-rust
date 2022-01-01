@@ -193,6 +193,10 @@ impl<'a> Chip8Interpreter<'a> {
             0x5000..=0x5fff => Chip8Interpreter::inst_x_eq_y,
             0x6000..=0x6fff => Chip8Interpreter::inst_load_vx,
             0x7000..=0x7fff => Chip8Interpreter::inst_add_to_vx,
+            0x8000..=0x8fff => match inst & 0xf {
+                0x0 => Chip8Interpreter::inst_load_x_with_y,
+                _ => panic!("Failed to decode instruction {:04x?}", inst),
+            },
             0x9000..=0x9fff => Chip8Interpreter::inst_x_ne_y,
             0xa000..=0xafff => Chip8Interpreter::inst_set_i,
             0xb000..=0xbfff => Chip8Interpreter::inst_jump_with_offset,
@@ -313,6 +317,14 @@ impl<'a> Chip8Interpreter<'a> {
         Ok(10)
     }
 
+    /// 8xy0
+    fn inst_load_x_with_y(&mut self) -> Result<usize, io::Error> {
+        let vy = self.memory.get_ro_slice(self.memory.var_addr + self.vy, 1)[0];
+        self.memory
+            .write(&[vy], self.memory.var_addr + self.vx, 1)?;
+        Ok(12)
+    }
+
     /// 9xy0
     fn inst_x_ne_y(&mut self) -> Result<usize, io::Error> {
         let lhs = self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0];
@@ -323,6 +335,12 @@ impl<'a> Chip8Interpreter<'a> {
         } else {
             Ok(14)
         }
+    }
+
+    /// annn
+    fn inst_set_i(&mut self) -> Result<usize, io::Error> {
+        self.i = self.instruction_data & 0xfff;
+        Ok(12)
     }
 
     /// bnnn
@@ -439,12 +457,6 @@ impl<'a> Chip8Interpreter<'a> {
         //  + (4 + 4) * rows for right byte (if visible)
         //  + 2 * rows for rbyte collision
         Ok(dur)
-    }
-
-    /// annn
-    fn inst_set_i(&mut self) -> Result<usize, io::Error> {
-        self.i = self.instruction_data & 0xfff;
-        Ok(12)
     }
 }
 
@@ -853,6 +865,26 @@ mod tests {
                 &[0, 0x03, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
             );
 
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_load_x_with_y() -> Result<(), io::Error> {
+        // 8xy0
+        test_with(|i| {
+            let mut m: &[u8] = &[0x81, 0x20];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x11, 0x22], 0xef1, 2)?;
+
+            // call 8120
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_load_x_with_y()?;
+
+            assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0x22, 0x22]);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+            // takes 12 cycles
+            assert_eq!(t, 12);
             Ok(())
         })
     }

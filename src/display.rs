@@ -60,6 +60,7 @@ impl Resolution {
             }
         })
     }
+
     fn bitplane_from_data<'a>(
         &self,
         data: &'a [u8],
@@ -72,16 +73,13 @@ impl Resolution {
                 count -= 1;
                 let bit = 1 & (data[count / 8] >> (7 - count % 8));
                 if bit == bitplane {
-                    break;
+                    return Some((
+                        (count % w) as f64,        // x
+                        -1.0 * (count / w) as f64, // y
+                    ));
                 }
             }
-            match count {
-                0 => None,
-                _ => Some((
-                    (count % w) as f64,        // x
-                    -1.0 * (count / w) as f64, // y
-                )),
-            }
+            None
         })
     }
 }
@@ -101,6 +99,10 @@ impl MonoTermDisplay {
             terminal,
             resolution: Resolution(x, y, 1),
         })
+    }
+
+    pub fn test_card(&mut self) -> Result<(), io::Error> {
+        self.draw(&CHIP8_TEST_CARD)
     }
 }
 
