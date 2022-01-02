@@ -195,6 +195,14 @@ impl<'a> Chip8Interpreter<'a> {
             0x7000..=0x7fff => Chip8Interpreter::inst_add_to_vx,
             0x8000..=0x8fff => match inst & 0xf {
                 0x0 => Chip8Interpreter::inst_load_x_with_y,
+                0x1 => Chip8Interpreter::inst_x_or_with_y,
+                0x2 => Chip8Interpreter::inst_x_and_with_y,
+                0x3 => Chip8Interpreter::inst_x_xor_with_y,
+                0x4 => Chip8Interpreter::inst_x_add_y,
+                0x5 => Chip8Interpreter::inst_x_minus_y,
+                0x6 => Chip8Interpreter::inst_rshift_y_load_x,
+                0x7 => Chip8Interpreter::inst_y_minus_x,
+                0xe => Chip8Interpreter::inst_lshift_y_load_x,
                 _ => panic!("Failed to decode instruction {:04x?}", inst),
             },
             0x9000..=0x9fff => Chip8Interpreter::inst_x_ne_y,
@@ -323,6 +331,101 @@ impl<'a> Chip8Interpreter<'a> {
         self.memory
             .write(&[vy], self.memory.var_addr + self.vx, 1)?;
         Ok(12)
+    }
+
+    /// 8xy1
+    fn inst_x_or_with_y(&mut self) -> Result<usize, io::Error> {
+        let vy = self.memory.get_ro_slice(self.memory.var_addr + self.vy, 1)[0];
+        let vx = self.memory.get_rw_slice(self.memory.var_addr + self.vx, 1);
+        vx[0] |= vy;
+        Ok(44)
+    }
+
+    /// 8xy2
+    fn inst_x_and_with_y(&mut self) -> Result<usize, io::Error> {
+        let vy = self.memory.get_ro_slice(self.memory.var_addr + self.vy, 1)[0];
+        let vx = self.memory.get_rw_slice(self.memory.var_addr + self.vx, 1);
+        vx[0] &= vy;
+        Ok(44)
+    }
+
+    /// 8xy3
+    fn inst_x_xor_with_y(&mut self) -> Result<usize, io::Error> {
+        let vy = self.memory.get_ro_slice(self.memory.var_addr + self.vy, 1)[0];
+        let vx = self.memory.get_rw_slice(self.memory.var_addr + self.vx, 1);
+        vx[0] ^= vy;
+        Ok(44)
+    }
+
+    /// 8xy4
+    fn inst_x_add_y(&mut self) -> Result<usize, io::Error> {
+        let vy = self.memory.get_ro_slice(self.memory.var_addr + self.vy, 1)[0] as u16;
+        let vx = self.memory.get_rw_slice(self.memory.var_addr + self.vx, 1);
+        let res: u16 = vx[0] as u16 + vy;
+        vx[0] = 0xff & res as u8;
+        self.memory.write(
+            &[if res > 0xff { 0x01 } else { 0x00 }],
+            self.memory.var_addr + 0xf,
+            1,
+        )?;
+        Ok(44)
+    }
+
+    /// 8xy5
+    fn inst_x_minus_y(&mut self) -> Result<usize, io::Error> {
+        let vy = self.memory.get_ro_slice(self.memory.var_addr + self.vy, 1)[0] as u16;
+        let vx = self.memory.get_rw_slice(self.memory.var_addr + self.vx, 1);
+        let res: u16 = 0x100 + (vx[0] as u16) - vy;
+        vx[0] = 0xff & res as u8;
+        self.memory.write(
+            &[if res < 0x100 { 0x00 } else { 0x01 }],
+            self.memory.var_addr + 0xf,
+            1,
+        )?;
+        Ok(44)
+    }
+
+    /// 8xy6
+    fn inst_rshift_y_load_x(&mut self) -> Result<usize, io::Error> {
+        // TODO variations
+        // (see discussion here: https://laurencescotford.com/chip-8-on-the-cosmac-vip-arithmetic-and-logic-instructions/)
+        let vy = self.memory.get_ro_slice(self.memory.var_addr + self.vy, 1)[0];
+        let res = vy >> 1;
+        self.memory
+            .write(&[res], self.memory.var_addr + self.vx, 1)?;
+        self.memory
+            .write(&[res], self.memory.var_addr + self.vy, 1)?;
+        self.memory
+            .write(&[vy & 0x1], self.memory.var_addr + 0xf, 1)?; // vf
+        Ok(44)
+    }
+    /// 8xy7
+    fn inst_y_minus_x(&mut self) -> Result<usize, io::Error> {
+        let vy = self.memory.get_ro_slice(self.memory.var_addr + self.vy, 1)[0] as u16;
+        let vx = self.memory.get_rw_slice(self.memory.var_addr + self.vx, 1);
+        let res: u16 = 0x100 + vy - (vx[0] as u16);
+        vx[0] = 0xff & res as u8;
+        self.memory.write(
+            &[if res < 0x100 { 0x00 } else { 0x01 }],
+            self.memory.var_addr + 0xf,
+            1,
+        )?;
+        Ok(44)
+    }
+
+    /// 8xye
+    fn inst_lshift_y_load_x(&mut self) -> Result<usize, io::Error> {
+        // TODO variations
+        // (see discussion here: https://laurencescotford.com/chip-8-on-the-cosmac-vip-arithmetic-and-logic-instructions/)
+        let vy = self.memory.get_ro_slice(self.memory.var_addr + self.vy, 1)[0];
+        let res: u8 = (vy << 1) & 0xff;
+        self.memory
+            .write(&[res], self.memory.var_addr + self.vx, 1)?;
+        self.memory
+            .write(&[res], self.memory.var_addr + self.vy, 1)?;
+        self.memory
+            .write(&[(vy & 0x80) >> 7], self.memory.var_addr + 0xf, 1)?; // vf
+        Ok(44)
     }
 
     /// 9xy0
@@ -885,6 +988,276 @@ mod tests {
             // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
             // takes 12 cycles
             assert_eq!(t, 12);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_x_or_with_y() -> Result<(), io::Error> {
+        // 8xy1
+        test_with(|i| {
+            let mut m: &[u8] = &[0x81, 0x21];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x2d, 0x4b], 0xef1, 2)?;
+
+            // call 8121
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_x_or_with_y()?;
+
+            assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0x6f, 0x4b]);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+            // takes 44 cycles
+            assert_eq!(t, 44);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_x_and_with_y() -> Result<(), io::Error> {
+        // 8xy2
+        test_with(|i| {
+            let mut m: &[u8] = &[0x81, 0x22];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x2d, 0x4b], 0xef1, 2)?;
+
+            // call 8122
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_x_and_with_y()?;
+
+            assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0x09, 0x4b]);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+            // takes 44 cycles
+            assert_eq!(t, 44);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_x_xor_with_y() -> Result<(), io::Error> {
+        // 8xy3
+        test_with(|i| {
+            let mut m: &[u8] = &[0x81, 0x23];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x2d, 0x4b], 0xef1, 2)?;
+
+            // call 8123
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_x_xor_with_y()?;
+
+            assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0x66, 0x4b]);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+            // takes 44 cycles
+            assert_eq!(t, 44);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_x_add_y() -> Result<(), io::Error> {
+        // 8xy4
+        test_with(|i| {
+            let mut m: &[u8] = &[0x81, 0x24];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x2d, 0x4b], 0xef1, 2)?;
+
+            // call 8124
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_x_add_y()?;
+
+            assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0x78, 0x4b]);
+            assert_eq!(i.memory.get_ro_slice(0xeff, 1), &[0x00]); // vf
+                                                                  // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+                                                                  // takes 44 cycles
+            assert_eq!(t, 44);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_x_add_y_carry() -> Result<(), io::Error> {
+        // 8xy4
+        test_with(|i| {
+            let mut m: &[u8] = &[0x81, 0x24];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0xed, 0x4b], 0xef1, 2)?;
+
+            // call 8124
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_x_add_y()?;
+
+            assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0x38, 0x4b]);
+            assert_eq!(i.memory.get_ro_slice(0xeff, 1), &[0x01]); // vf
+                                                                  // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+                                                                  // takes 44 cycles
+            assert_eq!(t, 44);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_x_minus_y() -> Result<(), io::Error> {
+        // 8xy5
+        test_with(|i| {
+            let mut m: &[u8] = &[0x81, 0x25];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x4b, 0x2d], 0xef1, 2)?;
+
+            // call 8125
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_x_minus_y()?;
+
+            assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0x1e, 0x2d]);
+            assert_eq!(i.memory.get_ro_slice(0xeff, 1), &[0x01]); // vf
+                                                                  // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+                                                                  // takes 44 cycles
+            assert_eq!(t, 44);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_x_minus_y_borrow() -> Result<(), io::Error> {
+        // 8xy5
+        test_with(|i| {
+            let mut m: &[u8] = &[0x81, 0x25];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x2d, 0x4b], 0xef1, 2)?;
+
+            // call 8125
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_x_minus_y()?;
+
+            assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0xe2, 0x4b]);
+            assert_eq!(i.memory.get_ro_slice(0xeff, 1), &[0x00]); // vf
+                                                                  // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+                                                                  // takes 44 cycles
+            assert_eq!(t, 44);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_rshift_y_load_x_0lsb() -> Result<(), io::Error> {
+        // 8xy6
+        test_with(|i| {
+            let mut m: &[u8] = &[0x81, 0x26];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0xff, 0x2c], 0xef1, 2)?;
+
+            // call 8126
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_rshift_y_load_x()?;
+
+            assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0x16, 0x16]);
+            assert_eq!(i.memory.get_ro_slice(0xeff, 1), &[0x00]); // vf
+                                                                  // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+                                                                  // takes 44 cycles
+            assert_eq!(t, 44);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_rshift_y_load_x_1lsb() -> Result<(), io::Error> {
+        // 8xy6
+        test_with(|i| {
+            let mut m: &[u8] = &[0x81, 0x26];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0xff, 0x2d], 0xef1, 2)?;
+
+            // call 8126
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_rshift_y_load_x()?;
+
+            assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0x16, 0x16]);
+            assert_eq!(i.memory.get_ro_slice(0xeff, 1), &[0x01]); // vf
+                                                                  // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+                                                                  // takes 44 cycles
+            assert_eq!(t, 44);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_y_minus_x() -> Result<(), io::Error> {
+        // 8xy7
+        test_with(|i| {
+            let mut m: &[u8] = &[0x81, 0x27];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x2d, 0x4b], 0xef1, 2)?;
+
+            // call 8127
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_y_minus_x()?;
+
+            assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0x1e, 0x4b]);
+            assert_eq!(i.memory.get_ro_slice(0xeff, 1), &[0x01]); // vf
+                                                                  // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+                                                                  // takes 44 cycles
+            assert_eq!(t, 44);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_y_minus_x_borrow() -> Result<(), io::Error> {
+        // 8xy7
+        test_with(|i| {
+            let mut m: &[u8] = &[0x81, 0x27];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x4b, 0x2d], 0xef1, 2)?;
+
+            // call 8127
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_y_minus_x()?;
+
+            assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0xe2, 0x2d]);
+            assert_eq!(i.memory.get_ro_slice(0xeff, 1), &[0x00]); // vf
+                                                                  // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+                                                                  // takes 44 cycles
+            assert_eq!(t, 44);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_lshift_y_load_x_0msb() -> Result<(), io::Error> {
+        // 8xye
+        test_with(|i| {
+            let mut m: &[u8] = &[0x81, 0x2e];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0xff, 0x2d], 0xef1, 2)?;
+
+            // call 812e
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_lshift_y_load_x()?;
+
+            assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0x5a, 0x5a]);
+            assert_eq!(i.memory.get_ro_slice(0xeff, 1), &[0x00]); // vf
+                                                                  // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+                                                                  // takes 44 cycles
+            assert_eq!(t, 44);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_lshift_y_load_x_1msb() -> Result<(), io::Error> {
+        // 8xye
+        test_with(|i| {
+            let mut m: &[u8] = &[0x81, 0x2e];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0xff, 0xad], 0xef1, 2)?;
+
+            // call 812e
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_lshift_y_load_x()?;
+
+            assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0x5a, 0x5a]);
+            assert_eq!(i.memory.get_ro_slice(0xeff, 1), &[0x01]); // vf
+                                                                  // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+                                                                  // takes 44 cycles
+            assert_eq!(t, 44);
             Ok(())
         })
     }
