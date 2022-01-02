@@ -76,8 +76,24 @@ impl<'a> Chip8Interpreter<'a> {
     }
 
     /// external interrupt
-    pub fn interrupt(&mut self) -> Result<usize, io::Error> {
-        // TODO soft-code
+    fn interrupt(&mut self) -> Result<usize, io::Error> {
+        // duration
+        // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-interrupts/
+        let mut dur = 807 + 1024;
+
+        // update general timer
+        if self.general_timer > 0 {
+            self.general_timer -= 1;
+            dur += 8;
+        }
+
+        // update tone timer
+        if self.tone_timer > 0 {
+            self.tone_timer -= 1;
+            dur += 4;
+        }
+
+        // TODO soft-code size
         self.display
             .draw(self.memory.get_ro_slice(self.display_pointer, 0x100))?;
 
@@ -86,8 +102,7 @@ impl<'a> Chip8Interpreter<'a> {
         if self.state == InterpreterState::WaitInterrupt {
             self.state = InterpreterState::Execute;
         }
-        // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-interrupts/
-        Ok(807 + 1024)
+        Ok(dur)
     }
 
     /// step the interpreter forward one state, returning number of machine
@@ -209,6 +224,12 @@ impl<'a> Chip8Interpreter<'a> {
             0xa000..=0xafff => Chip8Interpreter::inst_set_i,
             0xb000..=0xbfff => Chip8Interpreter::inst_jump_with_offset,
             0xd000..=0xdfff => Chip8Interpreter::inst_draw_sprite,
+            0xf000..=0xffff => match inst & 0xff {
+                0x07 => Chip8Interpreter::inst_get_timer,
+                0x15 => Chip8Interpreter::inst_set_timer,
+                0x1e => Chip8Interpreter::inst_add_x_to_i,
+                _ => panic!("Failed to decode instruction {:04x?}", inst),
+            },
             _ => panic!("Failed to decode instruction {:04x?}", inst),
         });
 
@@ -399,6 +420,7 @@ impl<'a> Chip8Interpreter<'a> {
             .write(&[vy & 0x1], self.memory.var_addr + 0xf, 1)?; // vf
         Ok(44)
     }
+
     /// 8xy7
     fn inst_y_minus_x(&mut self) -> Result<usize, io::Error> {
         let vy = self.memory.get_ro_slice(self.memory.var_addr + self.vy, 1)[0] as u16;
@@ -560,6 +582,32 @@ impl<'a> Chip8Interpreter<'a> {
         //  + (4 + 4) * rows for right byte (if visible)
         //  + 2 * rows for rbyte collision
         Ok(dur)
+    }
+
+    /// fx07
+    fn inst_get_timer(&mut self) -> Result<usize, io::Error> {
+        self.memory
+            .write(&[self.general_timer], self.memory.var_addr + self.vx, 1)?;
+        Ok(10)
+    }
+
+    /// fx15
+    fn inst_set_timer(&mut self) -> Result<usize, io::Error> {
+        self.general_timer = self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0];
+        Ok(10)
+    }
+
+    /// fx1e
+    fn inst_add_x_to_i(&mut self) -> Result<usize, io::Error> {
+        let vx = self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0] as u16;
+        let old_i = self.i;
+        self.i += vx;
+        // 12+4 or 18+4; from https://laurencescotford.com/chip-8-on-the-cosmac-vip-indexing-the-memory/
+        if (old_i & 0xff00) == (self.i & 0xff00) {
+            Ok(16)
+        } else {
+            Ok(22)
+        }
     }
 }
 
@@ -1392,6 +1440,104 @@ mod tests {
             assert_eq!(i.memory.get_ro_slice(0xeff, 1)[0], 1);
 
             assert_eq!(t, 428);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_get_timer() -> Result<(), io::Error> {
+        // fx07
+        test_with(|i| {
+            let mut m: &[u8] = &[0xf0, 0x07];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x80], 0xef0, 1)?;
+            i.general_timer = 0x08;
+
+            // call fx07
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_get_timer()?;
+
+            assert_eq!(i.memory.get_ro_slice(0xef0, 1), &[0x08]);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
+            // takes 10 cycles
+            assert_eq!(t, 10);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_set_timer() -> Result<(), io::Error> {
+        // fx15
+        test_with(|i| {
+            let mut m: &[u8] = &[0xf0, 0x15];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x80], 0xef0, 1)?;
+            i.general_timer = 0x08;
+
+            // call fx15
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_set_timer()?;
+
+            assert_eq!(i.general_timer, 0x80);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
+            // takes 10 cycles
+            assert_eq!(t, 10);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_interrupt_decrements_timer() -> Result<(), io::Error> {
+        test_with(|i| {
+            i.general_timer = 0x08;
+            let t = i.interrupt()?;
+
+            assert_eq!(i.general_timer, 0x07);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
+            // takes 815 + 1024 cycles
+            assert_eq!(t, 1839);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_add_x_to_i() -> Result<(), io::Error> {
+        // fx1e
+        test_with(|i| {
+            let mut m: &[u8] = &[0xf0, 0x1e];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x84], 0xef0, 1)?;
+            i.i = 0x42;
+
+            // call fx1e
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_add_x_to_i()?;
+
+            assert_eq!(i.i, 0xc6);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-indexing-the-memory/
+            // takes 12+4 cycles
+            assert_eq!(t, 16);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_add_x_to_i_with_carry() -> Result<(), io::Error> {
+        // fx1e
+        test_with(|i| {
+            let mut m: &[u8] = &[0xf0, 0x1e];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x84], 0xef0, 1)?;
+            i.i = 0x82;
+
+            // call fx1e
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_add_x_to_i()?;
+
+            assert_eq!(i.i, 0x106);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-indexing-the-memory/
+            // takes 18+4 cycles
+            assert_eq!(t, 22);
             Ok(())
         })
     }

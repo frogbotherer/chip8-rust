@@ -11,7 +11,8 @@ fn main() -> Result<(), io::Error> {
     let mut interpreter = Chip8Interpreter::new(&mut display)?;
 
     // load a program
-    let mut f = File::open("roms/ibm_logo.ch8")?;
+    //let mut f = File::open("roms/ibm_logo.ch8")?;
+    let mut f = File::open("roms/particle_demo.ch8")?;
     interpreter.load_program(&mut f)?;
     interpreter.main_loop(300)?;
 
