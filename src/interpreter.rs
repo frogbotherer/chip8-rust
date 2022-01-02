@@ -228,6 +228,8 @@ impl<'a> Chip8Interpreter<'a> {
                 0x07 => Chip8Interpreter::inst_get_timer,
                 0x15 => Chip8Interpreter::inst_set_timer,
                 0x1e => Chip8Interpreter::inst_add_x_to_i,
+                0x55 => Chip8Interpreter::inst_save_v_at_i,
+                0x65 => Chip8Interpreter::inst_load_v_at_i,
                 _ => panic!("Failed to decode instruction {:04x?}", inst),
             },
             _ => panic!("Failed to decode instruction {:04x?}", inst),
@@ -554,7 +556,7 @@ impl<'a> Chip8Interpreter<'a> {
         for (idx, byte) in work.iter().enumerate() {
             // TODO [again] this 8-byte stride is hard-coded to the width of the screen
             let this_addr = draw_addr + (idx / 2) * 0x8 + idx % 2;
-            if this_addr > vram.len() {
+            if this_addr >= vram.len() {
                 // drawing off the bottom of the screen
                 continue;
             }
@@ -608,6 +610,28 @@ impl<'a> Chip8Interpreter<'a> {
         } else {
             Ok(22)
         }
+    }
+
+    /// fx55
+    fn inst_save_v_at_i(&mut self) -> Result<usize, io::Error> {
+        let v = self.memory.get_ro_slice(self.memory.var_addr, 1 + self.vx as usize).to_vec();
+        self.memory.write(v.as_slice(), self.i, v.len())?;
+
+        // i points at address after i+vx
+        self.i += self.vx + 1;
+        // 14 + 14 * x + 4
+        Ok(14 + 14 * (1 + self.vx as usize) + 4)
+    }
+
+    /// fx65
+    fn inst_load_v_at_i(&mut self) -> Result<usize, io::Error> {
+        let v = self.memory.get_ro_slice(self.i, 1 + self.vx as usize).to_vec();
+        self.memory.write(v.as_slice(), self.memory.var_addr, v.len())?;
+
+        // i points at address after i+vx
+        self.i += self.vx + 1;
+        // 14 + 14 * x + 4
+        Ok(14 + 14 * (1 + self.vx as usize) + 4)
     }
 }
 
@@ -1114,8 +1138,9 @@ mod tests {
 
             assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0x78, 0x4b]);
             assert_eq!(i.memory.get_ro_slice(0xeff, 1), &[0x00]); // vf
-                                                                  // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
-                                                                  // takes 44 cycles
+
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+            // takes 44 cycles
             assert_eq!(t, 44);
             Ok(())
         })
@@ -1135,8 +1160,9 @@ mod tests {
 
             assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0x38, 0x4b]);
             assert_eq!(i.memory.get_ro_slice(0xeff, 1), &[0x01]); // vf
-                                                                  // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
-                                                                  // takes 44 cycles
+
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+            // takes 44 cycles
             assert_eq!(t, 44);
             Ok(())
         })
@@ -1156,8 +1182,9 @@ mod tests {
 
             assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0x1e, 0x2d]);
             assert_eq!(i.memory.get_ro_slice(0xeff, 1), &[0x01]); // vf
-                                                                  // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
-                                                                  // takes 44 cycles
+
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+            // takes 44 cycles
             assert_eq!(t, 44);
             Ok(())
         })
@@ -1177,8 +1204,9 @@ mod tests {
 
             assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0xe2, 0x4b]);
             assert_eq!(i.memory.get_ro_slice(0xeff, 1), &[0x00]); // vf
-                                                                  // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
-                                                                  // takes 44 cycles
+
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+            // takes 44 cycles
             assert_eq!(t, 44);
             Ok(())
         })
@@ -1198,8 +1226,9 @@ mod tests {
 
             assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0x16, 0x16]);
             assert_eq!(i.memory.get_ro_slice(0xeff, 1), &[0x00]); // vf
-                                                                  // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
-                                                                  // takes 44 cycles
+
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+            // takes 44 cycles
             assert_eq!(t, 44);
             Ok(())
         })
@@ -1219,8 +1248,9 @@ mod tests {
 
             assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0x16, 0x16]);
             assert_eq!(i.memory.get_ro_slice(0xeff, 1), &[0x01]); // vf
-                                                                  // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
-                                                                  // takes 44 cycles
+
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+            // takes 44 cycles
             assert_eq!(t, 44);
             Ok(())
         })
@@ -1240,8 +1270,9 @@ mod tests {
 
             assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0x1e, 0x4b]);
             assert_eq!(i.memory.get_ro_slice(0xeff, 1), &[0x01]); // vf
-                                                                  // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
-                                                                  // takes 44 cycles
+
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+            // takes 44 cycles
             assert_eq!(t, 44);
             Ok(())
         })
@@ -1261,8 +1292,9 @@ mod tests {
 
             assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0xe2, 0x2d]);
             assert_eq!(i.memory.get_ro_slice(0xeff, 1), &[0x00]); // vf
-                                                                  // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
-                                                                  // takes 44 cycles
+
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+            // takes 44 cycles
             assert_eq!(t, 44);
             Ok(())
         })
@@ -1282,8 +1314,9 @@ mod tests {
 
             assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0x5a, 0x5a]);
             assert_eq!(i.memory.get_ro_slice(0xeff, 1), &[0x00]); // vf
-                                                                  // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
-                                                                  // takes 44 cycles
+
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+            // takes 44 cycles
             assert_eq!(t, 44);
             Ok(())
         })
@@ -1303,8 +1336,9 @@ mod tests {
 
             assert_eq!(i.memory.get_ro_slice(0xef1, 2), &[0x5a, 0x5a]);
             assert_eq!(i.memory.get_ro_slice(0xeff, 1), &[0x01]); // vf
-                                                                  // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
-                                                                  // takes 44 cycles
+
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+            // takes 44 cycles
             assert_eq!(t, 44);
             Ok(())
         })
@@ -1541,4 +1575,49 @@ mod tests {
             Ok(())
         })
     }
+
+    #[test]
+    fn test_save_v_at_i() -> Result<(), io::Error> {
+        // fx55
+        test_with(|i| {
+            let mut m: &[u8] = &[0xff, 0x55];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f], 0xef0, 16)?;
+            i.i = 0x300;
+
+            // call fx55
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_save_v_at_i()?;
+
+            assert_eq!(i.i, 0x310);
+            assert_eq!(i.memory.get_ro_slice(0x300, 16), &[0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f]);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+            // takes 238 + 4 cycles for 16 registers
+            assert_eq!(t, 242);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_load_v_at_i() -> Result<(), io::Error> {
+        // fx65
+        test_with(|i| {
+            let mut m: &[u8] = &[0xff, 0x65];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f], 0x300, 16)?;
+            i.i = 0x300;
+
+            // call fx65
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_load_v_at_i()?;
+
+            assert_eq!(i.i, 0x310);
+            assert_eq!(i.memory.get_ro_slice(0xef0, 16), &[0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f]);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
+            // takes 238 + 4 cycles for 16 registers
+            assert_eq!(t, 242);
+            Ok(())
+        })
+    }
+
 }

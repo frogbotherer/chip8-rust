@@ -14,7 +14,7 @@ fn main() -> Result<(), io::Error> {
     //let mut f = File::open("roms/ibm_logo.ch8")?;
     let mut f = File::open("roms/particle_demo.ch8")?;
     interpreter.load_program(&mut f)?;
-    interpreter.main_loop(300)?;
+    interpreter.main_loop(600)?;
 
     // test card for the display
     //display.test_card()?;
