@@ -33,7 +33,7 @@ pub struct Chip8Interpreter<'a> {
     // contains the decoded instruction and the original four bytes
     // TODO use an enum or struct instead of Option?
     instruction: Option<fn(&mut Chip8Interpreter<'a>) -> Result<usize, io::Error>>,
-    pub instruction_data: u16,
+    instruction_data: u16,
     program_counter: u16,
     vx: u16,
     vy: u16,
@@ -80,6 +80,9 @@ impl<'a> Chip8Interpreter<'a> {
         // duration
         // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-interrupts/
         let mut dur = 807 + 1024;
+
+        // increment random seed
+        self.random = self.random.wrapping_add(1);
 
         // update general timer
         if self.general_timer > 0 {
@@ -223,6 +226,7 @@ impl<'a> Chip8Interpreter<'a> {
             0x9000..=0x9fff => Chip8Interpreter::inst_x_ne_y,
             0xa000..=0xafff => Chip8Interpreter::inst_set_i,
             0xb000..=0xbfff => Chip8Interpreter::inst_jump_with_offset,
+            0xc000..=0xcfff => Chip8Interpreter::inst_random,
             0xd000..=0xdfff => Chip8Interpreter::inst_draw_sprite,
             0xf000..=0xffff => match inst & 0xff {
                 0x07 => Chip8Interpreter::inst_get_timer,
@@ -483,6 +487,36 @@ impl<'a> Chip8Interpreter<'a> {
         }
     }
 
+    /// cxnn
+    fn inst_random(&mut self) -> Result<usize, io::Error> {
+        // increment seed
+        self.random = self.random.wrapping_add(1);
+
+        // address for random number
+        let rand_addr = 0x100 + (0xff & self.random);
+
+        // fetch byte at rand address
+        let rand_val = self.memory.get_ro_slice(rand_addr, 1)[0];
+
+        // add to high-order byte of seed
+        let rand_val = ((self.random >> 8) as u8).wrapping_add(rand_val);
+
+        // div by 2 and add to itself
+        let rand_val = (rand_val / 2).wrapping_add(rand_val);
+
+        // save in top byte of seed
+        self.random = (self.random & 0xff) + ((rand_val as u16) << 8);
+
+        // mask with nn and store in vx
+        self.memory.write(
+            &[rand_val & (self.instruction_data & 0xff) as u8],
+            self.memory.var_addr + self.vx,
+            1,
+        )?;
+
+        Ok(36)
+    }
+
     /// dxyn
     fn inst_draw_sprite(&mut self) -> Result<usize, io::Error> {
         //
@@ -614,7 +648,10 @@ impl<'a> Chip8Interpreter<'a> {
 
     /// fx55
     fn inst_save_v_at_i(&mut self) -> Result<usize, io::Error> {
-        let v = self.memory.get_ro_slice(self.memory.var_addr, 1 + self.vx as usize).to_vec();
+        let v = self
+            .memory
+            .get_ro_slice(self.memory.var_addr, 1 + self.vx as usize)
+            .to_vec();
         self.memory.write(v.as_slice(), self.i, v.len())?;
 
         // i points at address after i+vx
@@ -625,8 +662,12 @@ impl<'a> Chip8Interpreter<'a> {
 
     /// fx65
     fn inst_load_v_at_i(&mut self) -> Result<usize, io::Error> {
-        let v = self.memory.get_ro_slice(self.i, 1 + self.vx as usize).to_vec();
-        self.memory.write(v.as_slice(), self.memory.var_addr, v.len())?;
+        let v = self
+            .memory
+            .get_ro_slice(self.i, 1 + self.vx as usize)
+            .to_vec();
+        self.memory
+            .write(v.as_slice(), self.memory.var_addr, v.len())?;
 
         // i points at address after i+vx
         self.i += self.vx + 1;
@@ -1404,6 +1445,41 @@ mod tests {
     }
 
     #[test]
+    fn test_random_seed_inc_by_interrupt() -> Result<(), io::Error> {
+        test_with(|i| {
+            i.random = 0x1234;
+            i.interrupt()?;
+            assert_eq!(i.random, 0x1235);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_random_logic() -> Result<(), io::Error> {
+        // cxnn
+        test_with(|i| {
+            let mut m: &[u8] = &[0xc2, 0x03];
+            i.load_program(&mut m)?;
+            i.random = 0x0107;
+
+            // call c203
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_random()?;
+
+            // mem[1 + 0x0107 & 0xff] == 0x56
+            // 56 + 01 == 57
+            // 57/2+57 == 82
+
+            assert_eq!(i.random, 0x8208);
+            assert_eq!(i.memory.get_ro_slice(0xef2, 1), &[0x02]);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-generating-random-numbers/
+            // takes 36 cycles
+            assert_eq!(t, 36);
+            Ok(())
+        })
+    }
+
+    #[test]
     fn test_dxyn_waits() -> Result<(), io::Error> {
         // dxyn
         test_with(|i| {
@@ -1582,7 +1658,14 @@ mod tests {
         test_with(|i| {
             let mut m: &[u8] = &[0xff, 0x55];
             i.load_program(&mut m)?;
-            i.memory.write(&[0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f], 0xef0, 16)?;
+            i.memory.write(
+                &[
+                    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c,
+                    0x1d, 0x1e, 0x1f,
+                ],
+                0xef0,
+                16,
+            )?;
             i.i = 0x300;
 
             // call fx55
@@ -1590,7 +1673,13 @@ mod tests {
             let t = i.inst_save_v_at_i()?;
 
             assert_eq!(i.i, 0x310);
-            assert_eq!(i.memory.get_ro_slice(0x300, 16), &[0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f]);
+            assert_eq!(
+                i.memory.get_ro_slice(0x300, 16),
+                &[
+                    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c,
+                    0x1d, 0x1e, 0x1f
+                ]
+            );
             // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
             // takes 238 + 4 cycles for 16 registers
             assert_eq!(t, 242);
@@ -1604,7 +1693,14 @@ mod tests {
         test_with(|i| {
             let mut m: &[u8] = &[0xff, 0x65];
             i.load_program(&mut m)?;
-            i.memory.write(&[0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f], 0x300, 16)?;
+            i.memory.write(
+                &[
+                    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c,
+                    0x1d, 0x1e, 0x1f,
+                ],
+                0x300,
+                16,
+            )?;
             i.i = 0x300;
 
             // call fx65
@@ -1612,12 +1708,17 @@ mod tests {
             let t = i.inst_load_v_at_i()?;
 
             assert_eq!(i.i, 0x310);
-            assert_eq!(i.memory.get_ro_slice(0xef0, 16), &[0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f]);
+            assert_eq!(
+                i.memory.get_ro_slice(0xef0, 16),
+                &[
+                    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c,
+                    0x1d, 0x1e, 0x1f
+                ]
+            );
             // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-loading-and-saving-variables/
             // takes 238 + 4 cycles for 16 registers
             assert_eq!(t, 242);
             Ok(())
         })
     }
-
 }
