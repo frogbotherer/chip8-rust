@@ -571,12 +571,15 @@ impl<'a> Chip8Interpreter<'a> {
         let vx_val = 0x3f & self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0] as usize;
         let vy_val = 0x1f & self.memory.get_ro_slice(self.memory.var_addr + self.vy, 1)[0] as usize;
 
+        // number of rows in the sprite
+        let rows = 0xf & self.instruction_data as usize;
+
         // address to start drawing sprite in memory
         let draw_addr = vx_val / 8 // x byte offset
                       + vy_val * 8; // y byte offset
 
         // readable work area
-        let work = self.memory.get_ro_slice(self.memory.work_addr, 32).to_vec();
+        let work = self.memory.get_ro_slice(self.memory.work_addr, rows * 2).to_vec();
 
         // writable vram
         // TODO soft-code size
