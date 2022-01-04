@@ -232,6 +232,7 @@ impl<'a> Chip8Interpreter<'a> {
                 0x07 => Chip8Interpreter::inst_get_timer,
                 0x15 => Chip8Interpreter::inst_set_timer,
                 0x1e => Chip8Interpreter::inst_add_x_to_i,
+                0x33 => Chip8Interpreter::inst_x_to_bcd,
                 0x55 => Chip8Interpreter::inst_save_v_at_i,
                 0x65 => Chip8Interpreter::inst_load_v_at_i,
                 _ => panic!("Failed to decode instruction {:04x?}", inst),
@@ -579,7 +580,10 @@ impl<'a> Chip8Interpreter<'a> {
                       + vy_val * 8; // y byte offset
 
         // readable work area
-        let work = self.memory.get_ro_slice(self.memory.work_addr, rows * 2).to_vec();
+        let work = self
+            .memory
+            .get_ro_slice(self.memory.work_addr, rows * 2)
+            .to_vec();
 
         // writable vram
         // TODO soft-code size
@@ -647,6 +651,16 @@ impl<'a> Chip8Interpreter<'a> {
         } else {
             Ok(22)
         }
+    }
+
+    /// fx33
+    fn inst_x_to_bcd(&mut self) -> Result<usize, io::Error> {
+        let input = self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0];
+        let output = self.memory.get_rw_slice(self.i, 3);
+        output[0] = input / 100;
+        output[1] = (input % 100) / 10;
+        output[2] = (input % 100) % 10;
+        Ok(84 + 16 * ((output[0] + output[1] + output[2]) as usize))
     }
 
     /// fx55
@@ -1552,7 +1566,7 @@ mod tests {
             // vf == 1
             assert_eq!(i.memory.get_ro_slice(0xeff, 1)[0], 1);
 
-            assert_eq!(t, 428);
+            assert_eq!(t, 153);
             Ok(())
         })
     }
@@ -1651,6 +1665,28 @@ mod tests {
             // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-indexing-the-memory/
             // takes 18+4 cycles
             assert_eq!(t, 22);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_x_to_bcd() -> Result<(), io::Error> {
+        // fx33
+        test_with(|i| {
+            let mut m: &[u8] = &[0xf2, 0x33];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x7b], 0xef2, 1)?;
+            i.i = 0x300;
+
+            // call f233
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_x_to_bcd()?;
+
+            assert_eq!(i.i, 0x300);
+            assert_eq!(i.memory.get_ro_slice(i.i, 3), &[1, 2, 3]);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-binary-coded-decimal/
+            // takes 4 + 80 + (16 for each 1, 10, 100) cycles
+            assert_eq!(t, 180);
             Ok(())
         })
     }

@@ -252,7 +252,7 @@ mod tests {
 
 /// this is a display test card suitable for CHIP8, for testing display routines
 #[rustfmt::skip]
-pub const CHIP8_TEST_CARD: [u8; 256] = [
+const CHIP8_TEST_CARD: [u8; 256] = [
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, // 00 XXXXXXX|XXXXXXX|XXXXXXX|XXXXXXX|XXXXXXX|XXXXXXX|XXXXXXX|XXXXXXX|
     0x80, 0x00, 0x00, 0x01, 0x80, 0x00, 0x00, 0x01, // 01 X                              |X                              |
     0x80, 0x00, 0x00, 0x03, 0xc2, 0x41, 0x55, 0x55, // 02 X                             X|XX    X  X     | X X X | X X X |
