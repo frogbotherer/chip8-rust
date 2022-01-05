@@ -232,6 +232,7 @@ impl<'a> Chip8Interpreter<'a> {
                 0x07 => Chip8Interpreter::inst_get_timer,
                 0x15 => Chip8Interpreter::inst_set_timer,
                 0x1e => Chip8Interpreter::inst_add_x_to_i,
+                0x29 => Chip8Interpreter::inst_load_char,
                 0x33 => Chip8Interpreter::inst_x_to_bcd,
                 0x55 => Chip8Interpreter::inst_save_v_at_i,
                 0x65 => Chip8Interpreter::inst_load_v_at_i,
@@ -651,6 +652,18 @@ impl<'a> Chip8Interpreter<'a> {
         } else {
             Ok(22)
         }
+    }
+
+    /// fx29
+    fn inst_load_char(&mut self) -> Result<usize, io::Error> {
+        let ch = 0xf & self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0] as u16;
+
+        // since we have the _actual_ VIP interpreter in 0x000-0x1ff anyway for
+        // authentic "randomness" ... we can use its lookup to get font addresses
+        let lookup_addr = self.memory.get_ro_slice(0x8100 + ch, 1)[0] as u16;
+
+        self.i = 0x8100 + lookup_addr;
+        Ok(20)
     }
 
     /// fx33
@@ -1668,6 +1681,28 @@ mod tests {
             Ok(())
         })
     }
+
+    #[test]
+    fn test_load_char() -> Result<(), io::Error> {
+        // fx29
+        test_with(|i| {
+            let mut m: &[u8] = &[0xf2, 0x29];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x0e], 0xef2, 1)?;
+
+            // call f229
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_load_char()?;
+
+            assert_eq!(i.i, 0x8110);
+
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-the-character-set/
+            // takes 18+4 cycles
+            assert_eq!(t, 20);
+            Ok(())
+        })
+    }
+
 
     #[test]
     fn test_x_to_bcd() -> Result<(), io::Error> {

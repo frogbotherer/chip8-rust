@@ -55,6 +55,7 @@
 /// * ROMs: https://github.com/dmatlack/chip8/tree/master/roms
 ///         https://github.com/mir3z/chip8-emu/tree/master/roms
 /// * COSMAC details: https://laurencescotford.com/chip-8-on-the-cosmac-vip-index/
+///         http://www.bitsavers.org/components/rca/cosmac/COSMAC_VIP_Instruction_Manual_1978.pdf
 /// * variations: https://chip-8.github.io/extensions/
 pub mod display;
 pub mod interpreter;

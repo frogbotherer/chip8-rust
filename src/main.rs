@@ -11,13 +11,13 @@ fn main() -> Result<(), io::Error> {
     let mut interpreter = Chip8Interpreter::new(&mut display)?;
 
     // load a program
-    //let mut f = File::open("roms/zero_demo.ch8")?;
-    let mut f = File::open("roms/sqrt_test.ch8")?; // needs charset (fx29)
-                                                   //let mut f = File::open("roms/framed_2.ch8")?; // needs keys (ex9e)
-                                                   //let mut f = File::open("roms/shooting_stars.ch8")?; // needs charset (fx29)
+    let mut f = File::open("roms/trip8_demo.ch8")?;
+    //let mut f = File::open("roms/sqrt_test.ch8")?;
+    //let mut f = File::open("roms/framed_2.ch8")?; // needs keys (ex9e)
+    //let mut f = File::open("roms/shooting_stars.ch8")?; // needs charset (fx29)
 
     interpreter.load_program(&mut f)?;
-    interpreter.main_loop(3600)?;
+    interpreter.main_loop(1800)?;
 
     // test card for the display
     //display.test_card()?;
