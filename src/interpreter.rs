@@ -1703,7 +1703,6 @@ mod tests {
         })
     }
 
-
     #[test]
     fn test_x_to_bcd() -> Result<(), io::Error> {
         // fx33
