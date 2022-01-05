@@ -607,7 +607,7 @@ impl<'a> Chip8Interpreter<'a> {
                 // right-hand byte hangs off the edge of the screen
                 continue;
             }
-            if vram[this_addr] & *byte != *byte {
+            if (vram[this_addr] & *byte) != 0x0 {
                 collision_flag = 1;
                 dur += 2;
             }
