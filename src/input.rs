@@ -1,7 +1,7 @@
+use std::collections::HashMap;
 use std::io;
 use std::io::Read;
 use termion::{async_stdin, AsyncReader};
-use std::collections::HashMap;
 
 /// map of async bytes read from the keyboard to what the chip8 might expect
 /// where '1' => 0x01 and 'a' => 0x0a
@@ -72,7 +72,7 @@ impl Input for StdinInput {
             Some(res) => match res {
                 Ok(key) => match self.keymap.get(&key) {
                     Some(mapped_key) => Some(Ok(*mapped_key)),
-                    None => { eprintln!("---> {:?}", key); None },
+                    None => None,
                 },
                 Err(e) => Some(Err(e)),
             },
@@ -89,7 +89,7 @@ pub struct DummyInput {
 impl DummyInput {
     pub fn new(keys: &[u8]) -> Self {
         DummyInput {
-            bytes: Vec::from(keys)
+            bytes: Vec::from(keys),
         }
     }
 }
@@ -99,7 +99,7 @@ impl Input for DummyInput {
         let ret = self.bytes.pop();
         match ret {
             None => None,
-            Some(c) => Some(Ok(c))
+            Some(c) => Some(Ok(c)),
         }
     }
 }

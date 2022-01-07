@@ -47,7 +47,10 @@ pub struct Chip8Interpreter<'a> {
 }
 
 impl<'a> Chip8Interpreter<'a> {
-    pub fn new(display: &'a mut impl display::Display, input: &'a mut impl input::Input) -> Result<Chip8Interpreter<'a>, io::Error> {
+    pub fn new(
+        display: &'a mut impl display::Display,
+        input: &'a mut impl input::Input,
+    ) -> Result<Chip8Interpreter<'a>, io::Error> {
         let m = memory::Chip8MemoryMap::new()?;
         let mut i = Chip8Interpreter {
             memory: m,
@@ -641,13 +644,14 @@ impl<'a> Chip8Interpreter<'a> {
         match self.input.read_key() {
             Some(res) => match res {
                 Err(e) => Err(e),
-                Ok(key) =>
+                Ok(key) => {
                     if vx == key {
                         self.program_counter += 2;
                         Ok(18)
                     } else {
                         Ok(14)
-                    },
+                    }
+                }
             },
             None => Ok(14),
         }
@@ -659,18 +663,19 @@ impl<'a> Chip8Interpreter<'a> {
         match self.input.read_key() {
             Some(res) => match res {
                 Err(e) => Err(e),
-                Ok(key) =>
+                Ok(key) => {
                     if vx == key {
                         Ok(14)
                     } else {
                         self.program_counter += 2;
                         Ok(18)
-                    },
+                    }
+                }
             },
             None => {
                 self.program_counter += 2;
                 Ok(18)
-            },
+            }
         }
     }
 
@@ -1638,7 +1643,7 @@ mod tests {
             let mut m: &[u8] = &[0xe2, 0x9e];
             i.load_program(&mut m)?;
             i.memory.write(&[0x0a], 0xef2, 1)?;
-            while i.input.read_key().is_some() {};
+            while i.input.read_key().is_some() {}
 
             // call e29e
             let _ = i.fetch_and_decode()?;
@@ -1679,7 +1684,7 @@ mod tests {
             let mut m: &[u8] = &[0xe2, 0xa1];
             i.load_program(&mut m)?;
             i.memory.write(&[0x0a], 0xef2, 1)?;
-            while i.input.read_key().is_some() {};
+            while i.input.read_key().is_some() {}
 
             // call e2a1
             let _ = i.fetch_and_decode()?;
@@ -1711,9 +1716,7 @@ mod tests {
             assert_eq!(t, 14);
             Ok(())
         })
-
     }
-
 
     #[test]
     fn test_get_timer() -> Result<(), io::Error> {
