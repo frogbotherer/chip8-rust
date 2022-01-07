@@ -58,5 +58,6 @@
 ///         http://www.bitsavers.org/components/rca/cosmac/COSMAC_VIP_Instruction_Manual_1978.pdf
 /// * variations: https://chip-8.github.io/extensions/
 pub mod display;
+pub mod input;
 pub mod interpreter;
 pub mod memory;

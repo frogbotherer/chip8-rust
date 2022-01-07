@@ -20,7 +20,7 @@
 ///  P (4bit register) for determining which of R0-F is the current PC
 ///  X (4bit register) for "           "     "  R0-F is a pointer to a RAM address
 /// ... yes P and X can be set to the same register. yes we can ignore them.
-use crate::{display, memory, memory::MemoryMap};
+use crate::{display, input, memory, memory::MemoryMap};
 use std::{io, thread, time};
 
 const CHIP8_TARGET_FREQ_NS: u64 = 1_000_000_000 / 60; // 60 fps
@@ -29,6 +29,7 @@ const CHIP8_CYCLE_NS: u64 = 4540; // 4.54 us
 pub struct Chip8Interpreter<'a> {
     memory: memory::Chip8MemoryMap,
     display: &'a mut dyn display::Display,
+    input: &'a mut dyn input::Input,
     stack_pointer: u16,
     // contains the decoded instruction and the original four bytes
     // TODO use an enum or struct instead of Option?
@@ -46,11 +47,12 @@ pub struct Chip8Interpreter<'a> {
 }
 
 impl<'a> Chip8Interpreter<'a> {
-    pub fn new(display: &mut impl display::Display) -> Result<Chip8Interpreter, io::Error> {
+    pub fn new(display: &'a mut impl display::Display, input: &'a mut impl input::Input) -> Result<Chip8Interpreter<'a>, io::Error> {
         let m = memory::Chip8MemoryMap::new()?;
         let mut i = Chip8Interpreter {
             memory: m,
             display,
+            input,
             stack_pointer: 0x0000,
             instruction: None,
             instruction_data: 0x0000,
@@ -228,6 +230,11 @@ impl<'a> Chip8Interpreter<'a> {
             0xb000..=0xbfff => Chip8Interpreter::inst_jump_with_offset,
             0xc000..=0xcfff => Chip8Interpreter::inst_random,
             0xd000..=0xdfff => Chip8Interpreter::inst_draw_sprite,
+            0xe000..=0xefff => match inst & 0xff {
+                0x9e => Chip8Interpreter::inst_skip_key_eq,
+                0xa1 => Chip8Interpreter::inst_skip_key_ne,
+                _ => panic!("Failed to decode instruction {:04x?}", inst),
+            },
             0xf000..=0xffff => match inst & 0xff {
                 0x07 => Chip8Interpreter::inst_get_timer,
                 0x15 => Chip8Interpreter::inst_set_timer,
@@ -628,6 +635,45 @@ impl<'a> Chip8Interpreter<'a> {
         Ok(dur)
     }
 
+    /// ex9e
+    fn inst_skip_key_eq(&mut self) -> Result<usize, io::Error> {
+        let vx = self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0];
+        match self.input.read_key() {
+            Some(res) => match res {
+                Err(e) => Err(e),
+                Ok(key) =>
+                    if vx == key {
+                        self.program_counter += 2;
+                        Ok(18)
+                    } else {
+                        Ok(14)
+                    },
+            },
+            None => Ok(14),
+        }
+    }
+
+    /// exa1
+    fn inst_skip_key_ne(&mut self) -> Result<usize, io::Error> {
+        let vx = self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0];
+        match self.input.read_key() {
+            Some(res) => match res {
+                Err(e) => Err(e),
+                Ok(key) =>
+                    if vx == key {
+                        Ok(14)
+                    } else {
+                        self.program_counter += 2;
+                        Ok(18)
+                    },
+            },
+            None => {
+                self.program_counter += 2;
+                Ok(18)
+            },
+        }
+    }
+
     /// fx07
     fn inst_get_timer(&mut self) -> Result<usize, io::Error> {
         self.memory
@@ -733,7 +779,8 @@ mod tests {
         f: fn(i: &mut Chip8Interpreter) -> Result<(), io::Error>,
     ) -> Result<(), io::Error> {
         let mut display = display::DummyDisplay::new()?;
-        let mut i = Chip8Interpreter::new(&mut display)?;
+        let mut input = input::DummyInput::new(&[0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f]);
+        let mut i = Chip8Interpreter::new(&mut display, &mut input)?;
         let mut prog: &[u8] = &[0x00, 0xe0, 0xa2, 0x2a, 0x60, 0x0c];
         i.load_program(&mut prog)?;
         f(&mut i)
@@ -1579,10 +1626,94 @@ mod tests {
             // vf == 1
             assert_eq!(i.memory.get_ro_slice(0xeff, 1)[0], 1);
 
-            assert_eq!(t, 153);
+            assert_eq!(t, 139);
             Ok(())
         })
     }
+
+    #[test]
+    fn test_key_skip_eq_none() -> Result<(), io::Error> {
+        // ex9e
+        test_with(|i| {
+            let mut m: &[u8] = &[0xe2, 0x9e];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x0a], 0xef2, 1)?;
+            while i.input.read_key().is_some() {};
+
+            // call e29e
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_skip_key_eq()?;
+
+            assert_eq!(i.program_counter, 0x202);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
+            // takes 14 cycles
+            assert_eq!(t, 14);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_key_skip_eq_match() -> Result<(), io::Error> {
+        // ex9e
+        test_with(|i| {
+            let mut m: &[u8] = &[0xe2, 0x9e];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x0f], 0xef2, 1)?;
+
+            // call e29e
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_skip_key_eq()?;
+
+            assert_eq!(i.program_counter, 0x204);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
+            // takes 18 cycles
+            assert_eq!(t, 18);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_key_skip_ne_none() -> Result<(), io::Error> {
+        // exa1
+        test_with(|i| {
+            let mut m: &[u8] = &[0xe2, 0xa1];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x0a], 0xef2, 1)?;
+            while i.input.read_key().is_some() {};
+
+            // call e2a1
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_skip_key_ne()?;
+
+            assert_eq!(i.program_counter, 0x204);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
+            // takes 14 cycles
+            assert_eq!(t, 18);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_key_skip_ne_match() -> Result<(), io::Error> {
+        // exa1
+        test_with(|i| {
+            let mut m: &[u8] = &[0xe2, 0xa1];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x0f], 0xef2, 1)?;
+
+            // call e2a1
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_skip_key_ne()?;
+
+            assert_eq!(i.program_counter, 0x202);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
+            // takes 18 cycles
+            assert_eq!(t, 14);
+            Ok(())
+        })
+
+    }
+
 
     #[test]
     fn test_get_timer() -> Result<(), io::Error> {
