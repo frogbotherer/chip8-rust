@@ -21,7 +21,8 @@
 ///  X (4bit register) for "           "     "  R0-F is a pointer to a RAM address
 /// ... yes P and X can be set to the same register. yes we can ignore them.
 use crate::{display, input, memory, memory::MemoryMap};
-use std::{io, thread, time};
+use std::{io, time};
+use spin_sleep;
 
 const CHIP8_TARGET_FREQ_NS: u64 = 1_000_000_000 / 60; // 60 fps
 const CHIP8_CYCLE_NS: u64 = 4540; // 4.54 us
@@ -125,6 +126,8 @@ impl<'a> Chip8Interpreter<'a> {
 
     /// run the main interpreter loop, including timing and interrupts
     pub fn main_loop(&mut self, frame_count: usize) -> Result<(), io::Error> {
+        let sleep = spin_sleep::SpinSleeper::new(CHIP8_CYCLE_NS as u32);
+
         let mut remaining_sleep = time::Duration::from_nanos(0);
 
         // loop of frames
@@ -146,7 +149,7 @@ impl<'a> Chip8Interpreter<'a> {
             //    ^-now ^-inst_end                                     ^-frame end
 
             if inst_end >= now {
-                thread::sleep(inst_end - now);
+                sleep.sleep(inst_end - now);
             } else {
                 eprintln!(
                     "{:09?}: Warning: ISR took longer than COSMAC by {:?}",
@@ -176,12 +179,12 @@ impl<'a> Chip8Interpreter<'a> {
                     remaining_sleep = inst_end - frame_end;
                     // we can legitimately overrun the end of the frame during the instruction
                     if frame_end >= now {
-                        thread::sleep(frame_end - now);
+                        sleep.sleep(frame_end - now);
                     }
                     break;
                 } else {
                     if inst_end >= now {
-                        thread::sleep(inst_end - now);
+                        sleep.sleep(inst_end - now);
                     } else {
                         eprintln!(
                             "{:09?}: Warning: {:04x?} took longer than COSMAC by {:?}",
