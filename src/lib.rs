@@ -61,3 +61,4 @@ pub mod display;
 pub mod input;
 pub mod interpreter;
 pub mod memory;
+pub mod sound;

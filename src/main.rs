@@ -1,16 +1,18 @@
+use std::error::Error;
 use std::fs::File;
-use std::io;
 
 use chip8::display::MonoTermDisplay;
 use chip8::input::StdinInput;
 use chip8::interpreter::Chip8Interpreter;
+use chip8::sound::SimpleBeep;
 
-fn main() -> Result<(), io::Error> {
+fn main() -> Result<(), Box<dyn Error>> {
     // initialise
     // TODO: decouple internal and external resolution; make interpreter responsible for former
     let mut display = MonoTermDisplay::new(64, 32)?;
     let mut input = StdinInput::new();
-    let mut interpreter = Chip8Interpreter::new(&mut display, &mut input)?;
+    let mut sound = SimpleBeep::new();
+    let mut interpreter = Chip8Interpreter::new(&mut display, &mut input, &mut sound)?;
 
     // load a program
     //let mut f = File::open("roms/trip8_demo.ch8")?;

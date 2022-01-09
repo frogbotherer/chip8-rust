@@ -20,9 +20,9 @@
 ///  P (4bit register) for determining which of R0-F is the current PC
 ///  X (4bit register) for "           "     "  R0-F is a pointer to a RAM address
 /// ... yes P and X can be set to the same register. yes we can ignore them.
-use crate::{display, input, memory, memory::MemoryMap};
+use crate::{display, input, memory, memory::MemoryMap, sound};
 use spin_sleep;
-use std::{io, time};
+use std::{error::Error, io, time};
 
 const CHIP8_TARGET_FREQ_NS: u64 = 1_000_000_000 / 60; // 60 fps
 const CHIP8_CYCLE_NS: u64 = 4540; // 4.54 us
@@ -31,6 +31,7 @@ pub struct Chip8Interpreter<'a> {
     memory: memory::Chip8MemoryMap,
     display: &'a mut dyn display::Display,
     input: &'a mut dyn input::Input,
+    sound: &'a mut dyn sound::Sound,
     stack_pointer: u16,
     // contains the decoded instruction and the original four bytes
     // TODO use an enum or struct instead of Option?
@@ -51,12 +52,14 @@ impl<'a> Chip8Interpreter<'a> {
     pub fn new(
         display: &'a mut impl display::Display,
         input: &'a mut impl input::Input,
+        sound: &'a mut impl sound::Sound,
     ) -> Result<Chip8Interpreter<'a>, io::Error> {
         let m = memory::Chip8MemoryMap::new()?;
         let mut i = Chip8Interpreter {
             memory: m,
             display,
             input,
+            sound,
             stack_pointer: 0x0000,
             instruction: None,
             instruction_data: 0x0000,
@@ -82,7 +85,7 @@ impl<'a> Chip8Interpreter<'a> {
     }
 
     /// external interrupt
-    fn interrupt(&mut self) -> Result<usize, io::Error> {
+    fn interrupt(&mut self) -> Result<usize, Box<dyn Error>> {
         // duration
         // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-interrupts/
         let mut dur = 807 + 1024;
@@ -97,9 +100,17 @@ impl<'a> Chip8Interpreter<'a> {
         }
 
         // update tone timer
-        if self.tone_timer > 0 {
-            self.tone_timer -= 1;
-            dur += 4;
+        match self.tone_timer {
+            0 => {}
+            1 => {
+                self.tone_timer = 0;
+                self.sound.stop()?;
+                dur += 4;
+            }
+            _ => {
+                self.tone_timer -= 1;
+                dur += 4;
+            }
         }
 
         // TODO soft-code size
@@ -125,7 +136,7 @@ impl<'a> Chip8Interpreter<'a> {
     }
 
     /// run the main interpreter loop, including timing and interrupts
-    pub fn main_loop(&mut self, frame_count: usize) -> Result<(), io::Error> {
+    pub fn main_loop(&mut self, frame_count: usize) -> Result<(), Box<dyn Error>> {
         let sleep = spin_sleep::SpinSleeper::new(CHIP8_CYCLE_NS as u32);
 
         let mut remaining_sleep = time::Duration::from_nanos(0);
@@ -779,23 +790,24 @@ mod tests {
     use super::*;
 
     fn test_with(
-        f: fn(i: &mut Chip8Interpreter) -> Result<(), io::Error>,
-    ) -> Result<(), io::Error> {
+        f: fn(i: &mut Chip8Interpreter) -> Result<(), Box<dyn Error>>,
+    ) -> Result<(), Box<dyn Error>> {
         let mut display = display::DummyDisplay::new()?;
         let mut input = input::DummyInput::new(&[0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f]);
-        let mut i = Chip8Interpreter::new(&mut display, &mut input)?;
+        let mut sound = sound::Mute::new();
+        let mut i = Chip8Interpreter::new(&mut display, &mut input, &mut sound)?;
         let mut prog: &[u8] = &[0x00, 0xe0, 0xa2, 0x2a, 0x60, 0x0c];
         i.load_program(&mut prog)?;
         f(&mut i)
     }
 
     #[test]
-    fn test_program_load_ok() -> Result<(), io::Error> {
+    fn test_program_load_ok() -> Result<(), Box<dyn Error>> {
         test_with(|_i| Ok(()))
     }
 
     #[test]
-    fn test_fetch_and_decode_moves_pc() -> Result<(), io::Error> {
+    fn test_fetch_and_decode_moves_pc() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             let _ = i.fetch_and_decode()?;
             assert_eq!(i.program_counter, 0x202);
@@ -804,7 +816,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fetch_and_decode_sets_state() -> Result<(), io::Error> {
+    fn test_fetch_and_decode_sets_state() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             let _ = i.fetch_and_decode()?;
             assert!(i.state == InterpreterState::Execute);
@@ -813,7 +825,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fetch_and_decode_zero_inst_duration() -> Result<(), io::Error> {
+    fn test_fetch_and_decode_zero_inst_duration() -> Result<(), Box<dyn Error>> {
         // 0xxx instructions take 40 machine cycles on the original chip-8
         // the first test fixture instruction is 00e0
         test_with(|i| {
@@ -823,7 +835,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fetch_and_decode_other_inst_duration() -> Result<(), io::Error> {
+    fn test_fetch_and_decode_other_inst_duration() -> Result<(), Box<dyn Error>> {
         // other instructions take 68 machine cycles
         // the second test fixture instruction is axxx
         test_with(|i| {
@@ -834,7 +846,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fetch_and_decode_sets_vx() -> Result<(), io::Error> {
+    fn test_fetch_and_decode_sets_vx() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             // second test fixture instruction is a22a
             let _ = i.fetch_and_decode()?;
@@ -845,7 +857,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fetch_and_decode_sets_vy() -> Result<(), io::Error> {
+    fn test_fetch_and_decode_sets_vy() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             // first test fixture instruction is 0e00
             let _ = i.fetch_and_decode()?;
@@ -855,7 +867,7 @@ mod tests {
     }
 
     #[test]
-    fn test_call_ok() -> Result<(), io::Error> {
+    fn test_call_ok() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             let _ = i.fetch_and_decode()?;
             assert_eq!(i.call()?, 24); // cycles for 0e00
@@ -864,7 +876,7 @@ mod tests {
     }
 
     #[test]
-    fn test_clear_screen() -> Result<(), io::Error> {
+    fn test_clear_screen() -> Result<(), Box<dyn Error>> {
         // 0e00
         test_with(|i| {
             // fill display memory with 1s
@@ -884,7 +896,7 @@ mod tests {
     }
 
     #[test]
-    fn test_branch() -> Result<(), io::Error> {
+    fn test_branch() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             let mut m: &[u8] = &[0x12, 0x34];
             i.load_program(&mut m)?;
@@ -902,7 +914,7 @@ mod tests {
     }
 
     #[test]
-    fn test_subroutine() -> Result<(), io::Error> {
+    fn test_subroutine() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             let mut m: &[u8] = &[0x23, 0x45];
             i.load_program(&mut m)?;
@@ -922,7 +934,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ret() -> Result<(), io::Error> {
+    fn test_ret() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             let mut m: &[u8] = &[0x22, 0x04, 0x00, 0xe0, 0x00, 0xee];
             i.load_program(&mut m)?;
@@ -944,7 +956,7 @@ mod tests {
     }
 
     #[test]
-    fn test_skip_vx_eq_ok() -> Result<(), io::Error> {
+    fn test_skip_vx_eq_ok() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             let mut m: &[u8] = &[0x34, 0x56];
             i.load_program(&mut m)?;
@@ -963,7 +975,7 @@ mod tests {
     }
 
     #[test]
-    fn test_skip_vx_eq_not() -> Result<(), io::Error> {
+    fn test_skip_vx_eq_not() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             let mut m: &[u8] = &[0x34, 0x56];
             i.load_program(&mut m)?;
@@ -982,7 +994,7 @@ mod tests {
     }
 
     #[test]
-    fn test_skip_vx_ne_ok() -> Result<(), io::Error> {
+    fn test_skip_vx_ne_ok() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             let mut m: &[u8] = &[0x44, 0x67];
             i.load_program(&mut m)?;
@@ -1001,7 +1013,7 @@ mod tests {
     }
 
     #[test]
-    fn test_skip_vx_ne_not() -> Result<(), io::Error> {
+    fn test_skip_vx_ne_not() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             let mut m: &[u8] = &[0x44, 0x67];
             i.load_program(&mut m)?;
@@ -1020,7 +1032,7 @@ mod tests {
     }
 
     #[test]
-    fn test_skip_x_eq_y_ok() -> Result<(), io::Error> {
+    fn test_skip_x_eq_y_ok() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             let mut m: &[u8] = &[0x54, 0x50];
             i.load_program(&mut m)?;
@@ -1039,7 +1051,7 @@ mod tests {
     }
 
     #[test]
-    fn test_skip_x_eq_y_not() -> Result<(), io::Error> {
+    fn test_skip_x_eq_y_not() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             let mut m: &[u8] = &[0x54, 0x50];
             i.load_program(&mut m)?;
@@ -1058,7 +1070,7 @@ mod tests {
     }
 
     #[test]
-    fn test_skip_x_ne_y_ok() -> Result<(), io::Error> {
+    fn test_skip_x_ne_y_ok() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             let mut m: &[u8] = &[0x94, 0x50];
             i.load_program(&mut m)?;
@@ -1077,7 +1089,7 @@ mod tests {
     }
 
     #[test]
-    fn test_skip_x_ne_y_not() -> Result<(), io::Error> {
+    fn test_skip_x_ne_y_not() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             let mut m: &[u8] = &[0x94, 0x50];
             i.load_program(&mut m)?;
@@ -1096,7 +1108,7 @@ mod tests {
     }
 
     #[test]
-    fn test_load_vx() -> Result<(), io::Error> {
+    fn test_load_vx() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             let mut m: &[u8] = &[0x61, 0x23];
             i.load_program(&mut m)?;
@@ -1120,7 +1132,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add_to_vx() -> Result<(), io::Error> {
+    fn test_add_to_vx() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             let mut m: &[u8] = &[0x71, 0x99];
             i.load_program(&mut m)?;
@@ -1144,7 +1156,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add_to_vx_overrun() -> Result<(), io::Error> {
+    fn test_add_to_vx_overrun() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             let mut m: &[u8] = &[0x61, 0x81, 0x71, 0x82];
             i.load_program(&mut m)?;
@@ -1166,7 +1178,7 @@ mod tests {
     }
 
     #[test]
-    fn test_load_x_with_y() -> Result<(), io::Error> {
+    fn test_load_x_with_y() -> Result<(), Box<dyn Error>> {
         // 8xy0
         test_with(|i| {
             let mut m: &[u8] = &[0x81, 0x20];
@@ -1186,7 +1198,7 @@ mod tests {
     }
 
     #[test]
-    fn test_x_or_with_y() -> Result<(), io::Error> {
+    fn test_x_or_with_y() -> Result<(), Box<dyn Error>> {
         // 8xy1
         test_with(|i| {
             let mut m: &[u8] = &[0x81, 0x21];
@@ -1206,7 +1218,7 @@ mod tests {
     }
 
     #[test]
-    fn test_x_and_with_y() -> Result<(), io::Error> {
+    fn test_x_and_with_y() -> Result<(), Box<dyn Error>> {
         // 8xy2
         test_with(|i| {
             let mut m: &[u8] = &[0x81, 0x22];
@@ -1226,7 +1238,7 @@ mod tests {
     }
 
     #[test]
-    fn test_x_xor_with_y() -> Result<(), io::Error> {
+    fn test_x_xor_with_y() -> Result<(), Box<dyn Error>> {
         // 8xy3
         test_with(|i| {
             let mut m: &[u8] = &[0x81, 0x23];
@@ -1246,7 +1258,7 @@ mod tests {
     }
 
     #[test]
-    fn test_x_add_y() -> Result<(), io::Error> {
+    fn test_x_add_y() -> Result<(), Box<dyn Error>> {
         // 8xy4
         test_with(|i| {
             let mut m: &[u8] = &[0x81, 0x24];
@@ -1268,7 +1280,7 @@ mod tests {
     }
 
     #[test]
-    fn test_x_add_y_carry() -> Result<(), io::Error> {
+    fn test_x_add_y_carry() -> Result<(), Box<dyn Error>> {
         // 8xy4
         test_with(|i| {
             let mut m: &[u8] = &[0x81, 0x24];
@@ -1290,7 +1302,7 @@ mod tests {
     }
 
     #[test]
-    fn test_x_minus_y() -> Result<(), io::Error> {
+    fn test_x_minus_y() -> Result<(), Box<dyn Error>> {
         // 8xy5
         test_with(|i| {
             let mut m: &[u8] = &[0x81, 0x25];
@@ -1312,7 +1324,7 @@ mod tests {
     }
 
     #[test]
-    fn test_x_minus_y_borrow() -> Result<(), io::Error> {
+    fn test_x_minus_y_borrow() -> Result<(), Box<dyn Error>> {
         // 8xy5
         test_with(|i| {
             let mut m: &[u8] = &[0x81, 0x25];
@@ -1334,7 +1346,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rshift_y_load_x_0lsb() -> Result<(), io::Error> {
+    fn test_rshift_y_load_x_0lsb() -> Result<(), Box<dyn Error>> {
         // 8xy6
         test_with(|i| {
             let mut m: &[u8] = &[0x81, 0x26];
@@ -1356,7 +1368,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rshift_y_load_x_1lsb() -> Result<(), io::Error> {
+    fn test_rshift_y_load_x_1lsb() -> Result<(), Box<dyn Error>> {
         // 8xy6
         test_with(|i| {
             let mut m: &[u8] = &[0x81, 0x26];
@@ -1378,7 +1390,7 @@ mod tests {
     }
 
     #[test]
-    fn test_y_minus_x() -> Result<(), io::Error> {
+    fn test_y_minus_x() -> Result<(), Box<dyn Error>> {
         // 8xy7
         test_with(|i| {
             let mut m: &[u8] = &[0x81, 0x27];
@@ -1400,7 +1412,7 @@ mod tests {
     }
 
     #[test]
-    fn test_y_minus_x_borrow() -> Result<(), io::Error> {
+    fn test_y_minus_x_borrow() -> Result<(), Box<dyn Error>> {
         // 8xy7
         test_with(|i| {
             let mut m: &[u8] = &[0x81, 0x27];
@@ -1422,7 +1434,7 @@ mod tests {
     }
 
     #[test]
-    fn test_lshift_y_load_x_0msb() -> Result<(), io::Error> {
+    fn test_lshift_y_load_x_0msb() -> Result<(), Box<dyn Error>> {
         // 8xye
         test_with(|i| {
             let mut m: &[u8] = &[0x81, 0x2e];
@@ -1444,7 +1456,7 @@ mod tests {
     }
 
     #[test]
-    fn test_lshift_y_load_x_1msb() -> Result<(), io::Error> {
+    fn test_lshift_y_load_x_1msb() -> Result<(), Box<dyn Error>> {
         // 8xye
         test_with(|i| {
             let mut m: &[u8] = &[0x81, 0x2e];
@@ -1466,7 +1478,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_i() -> Result<(), io::Error> {
+    fn test_set_i() -> Result<(), Box<dyn Error>> {
         // annn
         test_with(|i| {
             let mut m: &[u8] = &[0xa1, 0x23];
@@ -1485,7 +1497,7 @@ mod tests {
     }
 
     #[test]
-    fn test_jump_offset() -> Result<(), io::Error> {
+    fn test_jump_offset() -> Result<(), Box<dyn Error>> {
         // bnnn
         test_with(|i| {
             let mut m: &[u8] = &[0xb1, 0x23];
@@ -1505,7 +1517,7 @@ mod tests {
     }
 
     #[test]
-    fn test_jump_offset_across_pages() -> Result<(), io::Error> {
+    fn test_jump_offset_across_pages() -> Result<(), Box<dyn Error>> {
         // bnnn
         test_with(|i| {
             let mut m: &[u8] = &[0xb1, 0x23];
@@ -1525,7 +1537,7 @@ mod tests {
     }
 
     #[test]
-    fn test_random_seed_inc_by_interrupt() -> Result<(), io::Error> {
+    fn test_random_seed_inc_by_interrupt() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             i.random = 0x1234;
             i.interrupt()?;
@@ -1535,7 +1547,7 @@ mod tests {
     }
 
     #[test]
-    fn test_random_logic() -> Result<(), io::Error> {
+    fn test_random_logic() -> Result<(), Box<dyn Error>> {
         // cxnn
         test_with(|i| {
             let mut m: &[u8] = &[0xc2, 0x03];
@@ -1560,7 +1572,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dxyn_waits() -> Result<(), io::Error> {
+    fn test_dxyn_waits() -> Result<(), Box<dyn Error>> {
         // dxyn
         test_with(|i| {
             let mut m: &[u8] = &[
@@ -1598,7 +1610,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dxyn_pt2() -> Result<(), io::Error> {
+    fn test_dxyn_pt2() -> Result<(), Box<dyn Error>> {
         // dxyn
         test_with(|i| {
             let mut m: &[u8] = &[
@@ -1635,7 +1647,7 @@ mod tests {
     }
 
     #[test]
-    fn test_key_skip_eq_none() -> Result<(), io::Error> {
+    fn test_key_skip_eq_none() -> Result<(), Box<dyn Error>> {
         // ex9e
         test_with(|i| {
             let mut m: &[u8] = &[0xe2, 0x9e];
@@ -1656,7 +1668,7 @@ mod tests {
     }
 
     #[test]
-    fn test_key_skip_eq_match() -> Result<(), io::Error> {
+    fn test_key_skip_eq_match() -> Result<(), Box<dyn Error>> {
         // ex9e
         test_with(|i| {
             let mut m: &[u8] = &[0xe2, 0x9e];
@@ -1677,7 +1689,7 @@ mod tests {
     }
 
     #[test]
-    fn test_key_skip_eq_nomatch() -> Result<(), io::Error> {
+    fn test_key_skip_eq_nomatch() -> Result<(), Box<dyn Error>> {
         // ex9e
         test_with(|i| {
             let mut m: &[u8] = &[0xe2, 0x9e];
@@ -1698,7 +1710,7 @@ mod tests {
     }
 
     #[test]
-    fn test_key_skip_ne_none() -> Result<(), io::Error> {
+    fn test_key_skip_ne_none() -> Result<(), Box<dyn Error>> {
         // exa1
         test_with(|i| {
             let mut m: &[u8] = &[0xe2, 0xa1];
@@ -1719,7 +1731,7 @@ mod tests {
     }
 
     #[test]
-    fn test_key_skip_ne_match() -> Result<(), io::Error> {
+    fn test_key_skip_ne_match() -> Result<(), Box<dyn Error>> {
         // exa1
         test_with(|i| {
             let mut m: &[u8] = &[0xe2, 0xa1];
@@ -1740,7 +1752,7 @@ mod tests {
     }
 
     #[test]
-    fn test_key_skip_ne_nomatch() -> Result<(), io::Error> {
+    fn test_key_skip_ne_nomatch() -> Result<(), Box<dyn Error>> {
         // exa1
         test_with(|i| {
             let mut m: &[u8] = &[0xe2, 0xa1];
@@ -1761,7 +1773,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_timer() -> Result<(), io::Error> {
+    fn test_get_timer() -> Result<(), Box<dyn Error>> {
         // fx07
         test_with(|i| {
             let mut m: &[u8] = &[0xf0, 0x07];
@@ -1782,7 +1794,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_tone() -> Result<(), io::Error> {
+    fn test_set_tone() -> Result<(), Box<dyn Error>> {
         // fx18
         test_with(|i| {
             let mut m: &[u8] = &[0xf0, 0x18];
@@ -1803,7 +1815,7 @@ mod tests {
     }
 
     #[test]
-    fn test_interrupt_decrements_tone_timer() -> Result<(), io::Error> {
+    fn test_interrupt_decrements_tone_timer() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             i.tone_timer = 0x08;
             let t = i.interrupt()?;
@@ -1817,7 +1829,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_timer() -> Result<(), io::Error> {
+    fn test_set_timer() -> Result<(), Box<dyn Error>> {
         // fx15
         test_with(|i| {
             let mut m: &[u8] = &[0xf0, 0x15];
@@ -1838,7 +1850,7 @@ mod tests {
     }
 
     #[test]
-    fn test_interrupt_decrements_timer() -> Result<(), io::Error> {
+    fn test_interrupt_decrements_timer() -> Result<(), Box<dyn Error>> {
         test_with(|i| {
             i.general_timer = 0x08;
             let t = i.interrupt()?;
@@ -1852,7 +1864,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add_x_to_i() -> Result<(), io::Error> {
+    fn test_add_x_to_i() -> Result<(), Box<dyn Error>> {
         // fx1e
         test_with(|i| {
             let mut m: &[u8] = &[0xf0, 0x1e];
@@ -1873,7 +1885,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add_x_to_i_with_carry() -> Result<(), io::Error> {
+    fn test_add_x_to_i_with_carry() -> Result<(), Box<dyn Error>> {
         // fx1e
         test_with(|i| {
             let mut m: &[u8] = &[0xf0, 0x1e];
@@ -1894,7 +1906,7 @@ mod tests {
     }
 
     #[test]
-    fn test_load_char() -> Result<(), io::Error> {
+    fn test_load_char() -> Result<(), Box<dyn Error>> {
         // fx29
         test_with(|i| {
             let mut m: &[u8] = &[0xf2, 0x29];
@@ -1915,7 +1927,7 @@ mod tests {
     }
 
     #[test]
-    fn test_x_to_bcd() -> Result<(), io::Error> {
+    fn test_x_to_bcd() -> Result<(), Box<dyn Error>> {
         // fx33
         test_with(|i| {
             let mut m: &[u8] = &[0xf2, 0x33];
@@ -1937,7 +1949,7 @@ mod tests {
     }
 
     #[test]
-    fn test_save_v_at_i() -> Result<(), io::Error> {
+    fn test_save_v_at_i() -> Result<(), Box<dyn Error>> {
         // fx55
         test_with(|i| {
             let mut m: &[u8] = &[0xff, 0x55];
@@ -1972,7 +1984,7 @@ mod tests {
     }
 
     #[test]
-    fn test_load_v_at_i() -> Result<(), io::Error> {
+    fn test_load_v_at_i() -> Result<(), Box<dyn Error>> {
         // fx65
         test_with(|i| {
             let mut m: &[u8] = &[0xff, 0x65];
