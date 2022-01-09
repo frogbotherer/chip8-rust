@@ -21,8 +21,8 @@
 ///  X (4bit register) for "           "     "  R0-F is a pointer to a RAM address
 /// ... yes P and X can be set to the same register. yes we can ignore them.
 use crate::{display, input, memory, memory::MemoryMap};
-use std::{io, time};
 use spin_sleep;
+use std::{io, time};
 
 const CHIP8_TARGET_FREQ_NS: u64 = 1_000_000_000 / 60; // 60 fps
 const CHIP8_CYCLE_NS: u64 = 4540; // 4.54 us

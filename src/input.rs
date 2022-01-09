@@ -79,7 +79,9 @@ impl StdinInput {
             };
             match self.keymap.get(&key) {
                 Some(mapped_key) => self.buffer.push(*mapped_key),
-                None => { eprintln!("Warning: can't map 0x{:02x?} to a COSMAC key", key); },
+                None => {
+                    eprintln!("Warning: can't map 0x{:02x?} to a COSMAC key", key);
+                }
             }
         }
         Ok(())
