@@ -47,13 +47,18 @@ const CHIP8_CONVENTIONAL_KEYMAP: [(u8, u8); 16] = [
 
 /// reads keypresses
 pub trait Input {
-    /// non-blocking keypress 0x00-0x0f (or None)
-    fn read_key(&mut self) -> Option<Result<u8, io::Error>>;
+    /// get a list of all the mapped keys that have been pressed recently,
+    /// without flushing them from the buffer
+    fn peek_keys(&mut self) -> Result<&[u8], io::Error>;
+
+    /// flush all the keypresses from the buffer
+    fn flush_keys(&mut self) -> Result<(), io::Error>;
 }
 
 /// simple implementation of Input, using STDIN
 pub struct StdinInput {
     stdin: io::Bytes<AsyncReader>,
+    buffer: Vec<u8>,
     keymap: HashMap<u8, u8>,
 }
 
@@ -61,23 +66,36 @@ impl StdinInput {
     pub fn new() -> Self {
         StdinInput {
             stdin: async_stdin().bytes(),
+            buffer: Vec::new(),
             keymap: HashMap::from(CHIP8_CONVENTIONAL_KEYMAP),
         }
+    }
+
+    fn read_stdin(&mut self) -> Result<(), io::Error> {
+        while let Some(raw_key) = self.stdin.next() {
+            let key = match raw_key {
+                Ok(key) => key,
+                Err(e) => return Err(e),
+            };
+            match self.keymap.get(&key) {
+                Some(mapped_key) => self.buffer.push(*mapped_key),
+                None => { eprintln!("Warning: can't map 0x{:02x?} to a COSMAC key", key); },
+            }
+        }
+        Ok(())
     }
 }
 
 impl Input for StdinInput {
-    fn read_key(&mut self) -> Option<Result<u8, io::Error>> {
-        match self.stdin.next() {
-            Some(res) => match res {
-                Ok(key) => match self.keymap.get(&key) {
-                    Some(mapped_key) => Some(Ok(*mapped_key)),
-                    None => None,
-                },
-                Err(e) => Some(Err(e)),
-            },
-            None => None,
-        }
+    fn peek_keys(&mut self) -> Result<&[u8], io::Error> {
+        self.read_stdin()?;
+        Ok(self.buffer.as_slice())
+    }
+
+    fn flush_keys(&mut self) -> Result<(), io::Error> {
+        self.read_stdin()?;
+        self.buffer.clear();
+        Ok(())
     }
 }
 
@@ -95,11 +113,12 @@ impl DummyInput {
 }
 
 impl Input for DummyInput {
-    fn read_key(&mut self) -> Option<Result<u8, io::Error>> {
-        let ret = self.bytes.pop();
-        match ret {
-            None => None,
-            Some(c) => Some(Ok(c)),
-        }
+    fn peek_keys(&mut self) -> Result<&[u8], io::Error> {
+        Ok(self.bytes.as_slice())
+    }
+
+    fn flush_keys(&mut self) -> Result<(), io::Error> {
+        self.bytes.clear();
+        Ok(())
     }
 }

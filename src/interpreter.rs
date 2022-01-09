@@ -644,41 +644,26 @@ impl<'a> Chip8Interpreter<'a> {
     /// ex9e
     fn inst_skip_key_eq(&mut self) -> Result<usize, io::Error> {
         let vx = self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0];
-        match self.input.read_key() {
-            Some(res) => match res {
-                Err(e) => Err(e),
-                Ok(key) => {
-                    if vx == key {
-                        self.program_counter += 2;
-                        Ok(18)
-                    } else {
-                        Ok(14)
-                    }
-                }
-            },
-            None => Ok(14),
+
+        if self.input.peek_keys()?.contains(&vx) {
+            self.input.flush_keys()?;
+            self.program_counter += 2;
+            Ok(18)
+        } else {
+            Ok(14)
         }
     }
 
     /// exa1
     fn inst_skip_key_ne(&mut self) -> Result<usize, io::Error> {
         let vx = self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0];
-        match self.input.read_key() {
-            Some(res) => match res {
-                Err(e) => Err(e),
-                Ok(key) => {
-                    if vx == key {
-                        Ok(14)
-                    } else {
-                        self.program_counter += 2;
-                        Ok(18)
-                    }
-                }
-            },
-            None => {
-                self.program_counter += 2;
-                Ok(18)
-            }
+
+        if !self.input.peek_keys()?.contains(&vx) {
+            self.program_counter += 2;
+            Ok(18)
+        } else {
+            self.input.flush_keys()?;
+            Ok(14)
         }
     }
 
@@ -1646,7 +1631,7 @@ mod tests {
             let mut m: &[u8] = &[0xe2, 0x9e];
             i.load_program(&mut m)?;
             i.memory.write(&[0x0a], 0xef2, 1)?;
-            while i.input.read_key().is_some() {}
+            i.input.flush_keys()?;
 
             // call e29e
             let _ = i.fetch_and_decode()?;
@@ -1673,9 +1658,31 @@ mod tests {
             let t = i.inst_skip_key_eq()?;
 
             assert_eq!(i.program_counter, 0x204);
+            assert_eq!(i.input.peek_keys()?.len(), 0);
             // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
             // takes 18 cycles
             assert_eq!(t, 18);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_key_skip_eq_nomatch() -> Result<(), io::Error> {
+        // ex9e
+        test_with(|i| {
+            let mut m: &[u8] = &[0xe2, 0x9e];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x01], 0xef2, 1)?;
+
+            // call e29e
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_skip_key_eq()?;
+
+            assert_eq!(i.program_counter, 0x202);
+            assert_ne!(i.input.peek_keys()?.len(), 0);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
+            // takes 14 cycles
+            assert_eq!(t, 14);
             Ok(())
         })
     }
@@ -1687,7 +1694,7 @@ mod tests {
             let mut m: &[u8] = &[0xe2, 0xa1];
             i.load_program(&mut m)?;
             i.memory.write(&[0x0a], 0xef2, 1)?;
-            while i.input.read_key().is_some() {}
+            i.input.flush_keys()?;
 
             // call e2a1
             let _ = i.fetch_and_decode()?;
@@ -1695,7 +1702,7 @@ mod tests {
 
             assert_eq!(i.program_counter, 0x204);
             // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
-            // takes 14 cycles
+            // takes 18 cycles
             assert_eq!(t, 18);
             Ok(())
         })
@@ -1714,9 +1721,31 @@ mod tests {
             let t = i.inst_skip_key_ne()?;
 
             assert_eq!(i.program_counter, 0x202);
+            assert_eq!(i.input.peek_keys()?.len(), 0);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
+            // takes 14 cycles
+            assert_eq!(t, 14);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_key_skip_ne_nomatch() -> Result<(), io::Error> {
+        // exa1
+        test_with(|i| {
+            let mut m: &[u8] = &[0xe2, 0xa1];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x01], 0xef2, 1)?;
+
+            // call e2a1
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_skip_key_ne()?;
+
+            assert_eq!(i.program_counter, 0x204);
+            assert_ne!(i.input.peek_keys()?.len(), 0);
             // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
             // takes 18 cycles
-            assert_eq!(t, 14);
+            assert_eq!(t, 18);
             Ok(())
         })
     }
