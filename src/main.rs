@@ -15,8 +15,8 @@ fn main() -> Result<(), io::Error> {
     // load a program
     //let mut f = File::open("roms/trip8_demo.ch8")?;
     //let mut f = File::open("roms/sqrt_test.ch8")?;
-    //let mut f = File::open("roms/framed_2.ch8")?; // needs keys (ex9e)
-    let mut f = File::open("roms/shooting_stars.ch8")?; // needs keys (exa1)
+    //let mut f = File::open("roms/framed_2.ch8")?;
+    let mut f = File::open("roms/submarine.ch8")?;
 
     interpreter.load_program(&mut f)?;
     interpreter.main_loop(1800)?;

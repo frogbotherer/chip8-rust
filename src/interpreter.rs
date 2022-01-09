@@ -244,6 +244,7 @@ impl<'a> Chip8Interpreter<'a> {
             0xf000..=0xffff => match inst & 0xff {
                 0x07 => Chip8Interpreter::inst_get_timer,
                 0x15 => Chip8Interpreter::inst_set_timer,
+                0x18 => Chip8Interpreter::inst_set_sound,
                 0x1e => Chip8Interpreter::inst_add_x_to_i,
                 0x29 => Chip8Interpreter::inst_load_char,
                 0x33 => Chip8Interpreter::inst_x_to_bcd,
@@ -646,6 +647,9 @@ impl<'a> Chip8Interpreter<'a> {
         let vx = self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0];
 
         if self.input.peek_keys()?.contains(&vx) {
+            // TODO the flush removes record of key vx being pressed until it's
+            // pressed again, which is not nearly the same as how the COSMAC
+            // actually works, and could introduce wrong behaviour
             self.input.flush_keys()?;
             self.program_counter += 2;
             Ok(18)
@@ -677,6 +681,12 @@ impl<'a> Chip8Interpreter<'a> {
     /// fx15
     fn inst_set_timer(&mut self) -> Result<usize, io::Error> {
         self.general_timer = self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0];
+        Ok(10)
+    }
+
+    /// fx18
+    fn inst_set_sound(&mut self) -> Result<usize, io::Error> {
+        self.tone_timer = self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0];
         Ok(10)
     }
 
@@ -1767,6 +1777,41 @@ mod tests {
             // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
             // takes 10 cycles
             assert_eq!(t, 10);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_set_tone() -> Result<(), io::Error> {
+        // fx18
+        test_with(|i| {
+            let mut m: &[u8] = &[0xf0, 0x18];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x80], 0xef0, 1)?;
+            i.tone_timer = 0x08;
+
+            // call fx18
+            let _ = i.fetch_and_decode()?;
+            let t = i.inst_set_sound()?;
+
+            assert_eq!(i.tone_timer, 0x80);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-sound/
+            // takes 10 cycles
+            assert_eq!(t, 10);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_interrupt_decrements_tone_timer() -> Result<(), io::Error> {
+        test_with(|i| {
+            i.tone_timer = 0x08;
+            let t = i.interrupt()?;
+
+            assert_eq!(i.tone_timer, 0x07);
+            // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
+            // takes 811 + 1024 cycles
+            assert_eq!(t, 1835);
             Ok(())
         })
     }
