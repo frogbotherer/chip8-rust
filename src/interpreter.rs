@@ -254,6 +254,7 @@ impl<'a> Chip8Interpreter<'a> {
             },
             0xf000..=0xffff => match inst & 0xff {
                 0x07 => Chip8Interpreter::inst_get_timer,
+                0x0a => Chip8Interpreter::inst_wait_key,
                 0x15 => Chip8Interpreter::inst_set_timer,
                 0x18 => Chip8Interpreter::inst_set_sound,
                 0x1e => Chip8Interpreter::inst_add_x_to_i,
@@ -687,6 +688,32 @@ impl<'a> Chip8Interpreter<'a> {
         self.memory
             .write(&[self.general_timer], self.memory.var_addr + self.vx, 1)?;
         Ok(10)
+    }
+
+    /// fx0a
+    fn inst_wait_key(&mut self) -> Result<usize, io::Error> {
+        // the plan is to poll for a key after each interrupt, so that wait_key
+        // is interruptable. theoretical timings can therefore be much shorter
+        // than the COSMAC, although the user is likely slower anyway
+        self.state = InterpreterState::WaitInterrupt;
+        let keys = self.input.peek_keys()?;
+
+        if keys.len() > 0 {
+            match self.tone_timer {
+                1 => {
+                    self.memory.write(&keys[..1], self.memory.var_addr + self.vx, 1)?;
+                    self.input.flush_keys()?;
+                    self.state = InterpreterState::FetchDecode;
+                },
+                2..=3 => {
+                    self.tone_timer -= 1;
+                },
+                _ => {
+                    self.tone_timer = 4;
+                },
+            }
+        }
+        Ok(1000) // dummy value
     }
 
     /// fx15
@@ -1789,6 +1816,24 @@ mod tests {
             // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
             // takes 10 cycles
             assert_eq!(t, 10);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_wait_key() -> Result<(), Box<dyn Error>> {
+        // fx0a
+        test_with(|i| {
+            let mut m: &[u8] = &[0xf0, 0x0a];
+            i.load_program(&mut m)?;
+            i.memory.write(&[0x80], 0xef0, 1)?;
+            i.tone_timer = 1;
+            // call fx0a
+            let _ = i.fetch_and_decode()?;
+            let _t = i.inst_wait_key()?;
+
+            assert_eq!(i.memory.get_ro_slice(0xef0, 1), &[0x0a]);
+            // see https://laurencescotford.com/chip-8-on-the-cosmac-vip-keyboard-input/
             Ok(())
         })
     }
