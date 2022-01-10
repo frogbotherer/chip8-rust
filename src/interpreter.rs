@@ -701,16 +701,17 @@ impl<'a> Chip8Interpreter<'a> {
         if keys.len() > 0 {
             match self.tone_timer {
                 1 => {
-                    self.memory.write(&keys[..1], self.memory.var_addr + self.vx, 1)?;
+                    self.memory
+                        .write(&keys[..1], self.memory.var_addr + self.vx, 1)?;
                     self.input.flush_keys()?;
                     self.state = InterpreterState::FetchDecode;
-                },
+                }
                 2..=3 => {
                     self.tone_timer -= 1;
-                },
+                }
                 _ => {
                     self.tone_timer = 4;
-                },
+                }
             }
         }
         Ok(1000) // dummy value
