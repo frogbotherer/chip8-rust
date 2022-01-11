@@ -1,6 +1,5 @@
 use std::io;
-use termion::raw::{IntoRawMode, RawTerminal};
-use tui::backend::TermionBackend;
+use tui::backend::CrosstermBackend;
 use tui::layout::Rect;
 use tui::style::{Color, Style};
 use tui::symbols::Marker;
@@ -84,16 +83,16 @@ impl Resolution {
     }
 }
 
-/// monochrome display in a terminal, rendered using TUI and Termion
+/// monochrome display in a terminal, rendered using TUI and Crossterm
 pub struct MonoTermDisplay {
-    terminal: Terminal<TermionBackend<RawTerminal<io::Stdout>>>,
+    terminal: Terminal<CrosstermBackend<io::Stdout>>,
     resolution: Resolution,
 }
 
 impl MonoTermDisplay {
     pub fn new(x: usize, y: usize) -> Result<MonoTermDisplay, io::Error> {
-        let stdout = io::stdout().into_raw_mode()?;
-        let backend = TermionBackend::new(stdout);
+        let stdout = io::stdout();
+        let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend)?;
         Ok(MonoTermDisplay {
             terminal,

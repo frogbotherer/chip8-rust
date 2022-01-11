@@ -1,7 +1,8 @@
+use crossterm::event::{poll, read, Event, KeyCode};
+use crossterm::terminal;
 use std::collections::HashMap;
 use std::io;
-use std::io::Read;
-use termion::{async_stdin, AsyncReader};
+use std::time::Duration;
 
 /// map of async bytes read from the keyboard to what the chip8 might expect
 /// where '1' => 0x01 and 'a' => 0x0a
@@ -26,23 +27,23 @@ const CHIP8_LITERAL_KEYMAP: [(u8, u8); 16] = [
 ];
 
 /// ditto using left-hand side of qwerty keyboard
-const CHIP8_CONVENTIONAL_KEYMAP: [(u8, u8); 16] = [
-    (0x78, 0x00), // x
-    (0x31, 0x01), // 1
-    (0x32, 0x02), // 2
-    (0x33, 0x03), // 3
-    (0x71, 0x04), // q
-    (0x77, 0x05), // w
-    (0x65, 0x06), // e
-    (0x61, 0x07), // a
-    (0x73, 0x08), // s
-    (0x64, 0x09), // d
-    (0x7a, 0x0a), // z
-    (0x63, 0x0b), // c
-    (0x34, 0x0c), // 4
-    (0x72, 0x0d), // r
-    (0x66, 0x0e), // f
-    (0x76, 0x0f), // v
+const CHIP8_CONVENTIONAL_KEYMAP: [(char, u8); 16] = [
+    ('x', 0x00), // x
+    ('1', 0x01), // 1
+    ('2', 0x02), // 2
+    ('3', 0x03), // 3
+    ('q', 0x04), // q
+    ('w', 0x05), // w
+    ('e', 0x06), // e
+    ('a', 0x07), // a
+    ('s', 0x08), // s
+    ('d', 0x09), // d
+    ('z', 0x0a), // z
+    ('c', 0x0b), // c
+    ('4', 0x0c), // 4
+    ('r', 0x0d), // r
+    ('f', 0x0e), // f
+    ('v', 0x0f), // v
 ];
 
 /// reads keypresses
@@ -57,34 +58,46 @@ pub trait Input {
 
 /// simple implementation of Input, using STDIN
 pub struct StdinInput {
-    stdin: io::Bytes<AsyncReader>,
     buffer: Vec<u8>,
-    keymap: HashMap<u8, u8>,
+    keymap: HashMap<char, u8>,
 }
 
 impl StdinInput {
     pub fn new() -> Self {
+        terminal::enable_raw_mode().unwrap();
         StdinInput {
-            stdin: async_stdin().bytes(),
             buffer: Vec::new(),
             keymap: HashMap::from(CHIP8_CONVENTIONAL_KEYMAP),
         }
     }
 
     fn read_stdin(&mut self) -> Result<(), io::Error> {
-        while let Some(raw_key) = self.stdin.next() {
-            let key = match raw_key {
-                Ok(key) => key,
-                Err(e) => return Err(e),
-            };
-            match self.keymap.get(&key) {
-                Some(mapped_key) => self.buffer.push(*mapped_key),
-                None => {
-                    eprintln!("Warning: can't map 0x{:02x?} to a COSMAC key", key);
+        while poll(Duration::from_millis(0))? {
+            match read()? {
+                Event::Key(evt) => match evt.code {
+                    KeyCode::Char(key) => match self.keymap.get(&key) {
+                        Some(mapped_key) => self.buffer.push(*mapped_key),
+                        None => {
+                            eprintln!("Warning: can't map 0x{:02x?} to a COSMAC key", key);
+                        }
+                    },
+                    KeyCode::Esc => panic!("TODO: proper emulator menus"),
+                    _ => {
+                        eprintln!("Warning: unknown key event received");
+                    }
+                },
+                _ => {
+                    eprintln!("Warning: unknown event received");
                 }
             }
         }
         Ok(())
+    }
+}
+
+impl Drop for StdinInput {
+    fn drop(&mut self) {
+        terminal::disable_raw_mode().unwrap();
     }
 }
 

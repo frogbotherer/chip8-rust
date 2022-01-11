@@ -6,7 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tui = "0.16.0"
-termion = "1.5"
+tui = { version = "0.16", default-features = false, features = ['crossterm'] } 
+#termion = "1.5"
+crossterm = "0.22"
 beep = "0.3.0"
 spin_sleep = "1.0.0"
