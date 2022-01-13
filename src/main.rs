@@ -1,3 +1,4 @@
+use std::env;
 use std::error::Error;
 use std::fs::File;
 
@@ -7,6 +8,12 @@ use chip8::interpreter::Chip8Interpreter;
 use chip8::sound::Mute;
 
 fn main() -> Result<(), Box<dyn Error>> {
+    // read cli args
+    let rom_path = match env::args().nth(1) {
+        Some(p) => p,
+        None => "roms/trip8_demo.ch8".to_string(),
+    };
+
     // initialise
     // TODO: decouple internal and external resolution; make interpreter responsible for former
     let mut display = MonoTermDisplay::new(64, 32)?;
@@ -15,10 +22,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut interpreter = Chip8Interpreter::new(&mut display, &mut input, &mut sound)?;
 
     // load a program
-    let mut f = File::open("roms/trip8_demo.ch8")?;
-    //let mut f = File::open("roms/sqrt_test.ch8")?;
-    //let mut f = File::open("roms/submarine.ch8")?; // problem with sprite rendering still?
-    //let mut f = File::open("roms/hi_lo.ch8")?; // f10a
+    let mut f = File::open(rom_path)?;
+    //"roms/submarine.ch8"; // problem with sprite rendering still?
+    //"roms/hi_lo.ch8"; // why is it always 00 ?
 
     interpreter.load_program(&mut f)?;
     interpreter.main_loop(18_000)?;

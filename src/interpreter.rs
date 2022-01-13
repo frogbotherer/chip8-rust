@@ -113,6 +113,9 @@ impl<'a> Chip8Interpreter<'a> {
             }
         }
 
+        // poll the input buffer in case there's an escape keypress
+        let _ = self.input.peek_keys();
+
         // TODO soft-code size
         self.display
             .draw(self.memory.get_ro_slice(self.display_pointer, 0x100))?;
