@@ -631,7 +631,7 @@ impl<'a> Chip8Interpreter<'a> {
                 // drawing off the bottom of the screen
                 continue;
             }
-            if idx % 2 == 1 && (this_addr & 0x3f) == 0 {
+            if idx % 2 == 1 && (this_addr & 0x7) == 0 {
                 // TODO and this
                 // right-hand byte hangs off the edge of the screen
                 continue;
