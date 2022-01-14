@@ -48,26 +48,30 @@ const CHIP8_CONVENTIONAL_KEYMAP: [(char, u8); 16] = [
 
 /// reads keypresses
 pub trait Input {
-    /// get a list of all the mapped keys that have been pressed recently,
-    /// without flushing them from the buffer
-    fn peek_keys(&mut self) -> Result<&[u8], io::Error>;
-
-    /// flush all the keypresses from the buffer
+    /// forget the latched key
     fn flush_keys(&mut self) -> Result<(), io::Error>;
+
+    /// read the latched key
+    fn read_key(&mut self) -> Result<Option<u8>, io::Error>;
+
+    /// tell the input that a frame has passed
+    fn tick(&mut self) -> Result<(), io::Error>;
 }
 
 /// simple implementation of Input, using STDIN
 pub struct StdinInput {
-    buffer: Vec<u8>,
     keymap: HashMap<char, u8>,
+    latched_key: Option<u8>,
+    timer: usize,
 }
 
 impl StdinInput {
     pub fn new() -> Self {
         terminal::enable_raw_mode().unwrap();
         StdinInput {
-            buffer: Vec::new(),
             keymap: HashMap::from(CHIP8_CONVENTIONAL_KEYMAP),
+            latched_key: None,
+            timer: STDIN_DEBOUNCE_FRAMES,
         }
     }
 
@@ -76,9 +80,9 @@ impl StdinInput {
             match read()? {
                 Event::Key(evt) => match evt.code {
                     KeyCode::Char(key) => match self.keymap.get(&key) {
-                        Some(mapped_key) => self.buffer.push(*mapped_key),
+                        Some(mapped_key) => self.latched_key = Some(*mapped_key),
                         None => {
-                            eprintln!("Warning: can't map 0x{:02x?} to a COSMAC key", key);
+                            eprintln!("Warning: can't map {:02x?} to a COSMAC key", key);
                         }
                     },
                     KeyCode::Esc => panic!("TODO: proper emulator menus"),
@@ -101,15 +105,28 @@ impl Drop for StdinInput {
     }
 }
 
+const STDIN_DEBOUNCE_FRAMES: usize = 30; // half a second
+
 impl Input for StdinInput {
-    fn peek_keys(&mut self) -> Result<&[u8], io::Error> {
-        self.read_stdin()?;
-        Ok(self.buffer.as_slice())
+    fn flush_keys(&mut self) -> Result<(), io::Error> {
+        self.latched_key = None;
+        Ok(())
     }
 
-    fn flush_keys(&mut self) -> Result<(), io::Error> {
-        self.read_stdin()?;
-        self.buffer.clear();
+    fn read_key(&mut self) -> Result<Option<u8>, io::Error> {
+        if self.latched_key == None {
+            self.read_stdin()?;
+        }
+        Ok(self.latched_key)
+    }
+
+    fn tick(&mut self) -> Result<(), io::Error> {
+        self.timer -= 1;
+        if self.timer == 0 {
+            self.flush_keys()?;
+            self.read_stdin()?;
+            self.timer = STDIN_DEBOUNCE_FRAMES;
+        }
         Ok(())
     }
 }
@@ -128,12 +145,16 @@ impl DummyInput {
 }
 
 impl Input for DummyInput {
-    fn peek_keys(&mut self) -> Result<&[u8], io::Error> {
-        Ok(self.bytes.as_slice())
-    }
-
     fn flush_keys(&mut self) -> Result<(), io::Error> {
         self.bytes.clear();
+        Ok(())
+    }
+
+    fn read_key(&mut self) -> Result<Option<u8>, io::Error> {
+        Ok(self.bytes.pop())
+    }
+
+    fn tick(&mut self) -> Result<(), io::Error> {
         Ok(())
     }
 }

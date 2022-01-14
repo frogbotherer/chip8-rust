@@ -113,8 +113,8 @@ impl<'a> Chip8Interpreter<'a> {
             }
         }
 
-        // poll the input buffer in case there's an escape keypress
-        let _ = self.input.peek_keys();
+        // tell the input routines that another frame has passed
+        self.input.tick()?;
 
         // TODO soft-code size
         self.display
@@ -661,10 +661,7 @@ impl<'a> Chip8Interpreter<'a> {
     fn inst_skip_key_eq(&mut self) -> Result<usize, io::Error> {
         let vx = self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0];
 
-        if self.input.peek_keys()?.contains(&vx) {
-            // TODO the flush removes record of key vx being pressed until it's
-            // pressed again, which is not nearly the same as how the COSMAC
-            // actually works, and could introduce wrong behaviour
+        if self.input.read_key()? == Some(vx) {
             self.input.flush_keys()?;
             self.program_counter += 2;
             Ok(18)
@@ -677,7 +674,7 @@ impl<'a> Chip8Interpreter<'a> {
     fn inst_skip_key_ne(&mut self) -> Result<usize, io::Error> {
         let vx = self.memory.get_ro_slice(self.memory.var_addr + self.vx, 1)[0];
 
-        if !self.input.peek_keys()?.contains(&vx) {
+        if self.input.read_key()? != Some(vx) {
             self.program_counter += 2;
             Ok(18)
         } else {
@@ -699,13 +696,12 @@ impl<'a> Chip8Interpreter<'a> {
         // is interruptable. theoretical timings can therefore be much shorter
         // than the COSMAC, although the user is likely slower anyway
         self.state = InterpreterState::WaitInterrupt;
-        let keys = self.input.peek_keys()?;
 
-        if keys.len() > 0 {
+        if let Some(key) = self.input.read_key()? {
             match self.tone_timer {
                 1 => {
                     self.memory
-                        .write(&keys[..1], self.memory.var_addr + self.vx, 1)?;
+                        .write(&[key], self.memory.var_addr + self.vx, 1)?;
                     self.input.flush_keys()?;
                     self.state = InterpreterState::FetchDecode;
                 }
@@ -1711,7 +1707,7 @@ mod tests {
             let t = i.inst_skip_key_eq()?;
 
             assert_eq!(i.program_counter, 0x204);
-            assert_eq!(i.input.peek_keys()?.len(), 0);
+            assert_eq!(i.input.read_key()?, None);
             // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
             // takes 18 cycles
             assert_eq!(t, 18);
@@ -1732,7 +1728,7 @@ mod tests {
             let t = i.inst_skip_key_eq()?;
 
             assert_eq!(i.program_counter, 0x202);
-            assert_ne!(i.input.peek_keys()?.len(), 0);
+            assert_ne!(i.input.read_key()?, None);
             // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
             // takes 14 cycles
             assert_eq!(t, 14);
@@ -1774,7 +1770,7 @@ mod tests {
             let t = i.inst_skip_key_ne()?;
 
             assert_eq!(i.program_counter, 0x202);
-            assert_eq!(i.input.peek_keys()?.len(), 0);
+            assert_eq!(i.input.read_key()?, None);
             // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
             // takes 14 cycles
             assert_eq!(t, 14);
@@ -1795,7 +1791,7 @@ mod tests {
             let t = i.inst_skip_key_ne()?;
 
             assert_eq!(i.program_counter, 0x204);
-            assert_ne!(i.input.peek_keys()?.len(), 0);
+            assert_ne!(i.input.read_key()?, None);
             // from https://laurencescotford.com/chip-8-on-the-cosmac-vip-branch-and-call-instructions/
             // takes 18 cycles
             assert_eq!(t, 18);
@@ -1836,7 +1832,7 @@ mod tests {
             let _ = i.fetch_and_decode()?;
             let _t = i.inst_wait_key()?;
 
-            assert_eq!(i.memory.get_ro_slice(0xef0, 1), &[0x0a]);
+            assert_eq!(i.memory.get_ro_slice(0xef0, 1), &[0x0f]);
             // see https://laurencescotford.com/chip-8-on-the-cosmac-vip-keyboard-input/
             Ok(())
         })

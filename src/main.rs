@@ -23,7 +23,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // load a program
     let mut f = File::open(rom_path)?;
-    //"roms/submarine.ch8"; // problem with sprite rendering still?
     //"roms/hi_lo.ch8"; // why is it always 00 ?
 
     interpreter.load_program(&mut f)?;
