@@ -21,6 +21,7 @@
 ///  X (4bit register) for "           "     "  R0-F is a pointer to a RAM address
 /// ... yes P and X can be set to the same register. yes we can ignore them.
 use crate::{display, input, memory, memory::MemoryMap, sound};
+use rand::Rng;
 use spin_sleep;
 use std::{error::Error, io, time};
 
@@ -68,7 +69,7 @@ impl<'a> Chip8Interpreter<'a> {
             vy: 0x0000,
             tone_timer: 0x00,
             general_timer: 0x00,
-            random: 0x0000,
+            random: rand::thread_rng().gen::<u16>(),
             i: 0x0000,
             display_pointer: 0x0000,
             state: InterpreterState::FetchDecode,

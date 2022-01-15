@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 tui = { version = "0.16", default-features = false, features = ['crossterm'] } 
-#termion = "1.5"
 crossterm = "0.22"
 beep = "0.3.0"
+rand = "0.8.4"
 spin_sleep = "1.0.0"

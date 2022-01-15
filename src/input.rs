@@ -105,7 +105,8 @@ impl Drop for StdinInput {
     }
 }
 
-const STDIN_DEBOUNCE_FRAMES: usize = 30; // half a second
+/// how long to remember a keypress for
+const STDIN_DEBOUNCE_FRAMES: usize = 30; // 1/2 second
 
 impl Input for StdinInput {
     fn flush_keys(&mut self) -> Result<(), io::Error> {
